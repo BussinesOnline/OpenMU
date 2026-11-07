@@ -97,10 +97,10 @@ public sealed class PlayerPortalPostgreSqlTests
             var configurationSource = configurations.Object;
             var registrations = new AccountRegistrationService(persistence, configurationSource);
             var sessions = new PlayerSessionStore(TimeProvider.System);
-            var service = new PlayerPortalService(persistence, configurationSource, registrations, sessions, new PlayerLoginAttemptLimiter(TimeProvider.System));
+            var service = new PlayerPortalService(persistence, configurationSource, registrations, sessions, new PlayerLoginAttemptLimiter(TimeProvider.System), TimeProvider.System);
 
-            Assert.That(await service.RegisterAsync(new AccountRegistration { LoginName = "portalone", Password = "GamePass1" }).ConfigureAwait(false), Is.EqualTo(AccountRegistrationStatus.Created));
-            Assert.That(await service.RegisterAsync(new AccountRegistration { LoginName = "portaltwo", Password = "GamePass2" }).ConfigureAwait(false), Is.EqualTo(AccountRegistrationStatus.Created));
+            Assert.That(await service.RegisterAsync(Registration("portalone", "GamePass1")).ConfigureAwait(false), Is.EqualTo(AccountRegistrationStatus.Created));
+            Assert.That(await service.RegisterAsync(Registration("portaltwo", "GamePass2")).ConfigureAwait(false), Is.EqualTo(AccountRegistrationStatus.Created));
 
             var first = await service.LoginAsync(new PlayerLoginRequest { LoginName = "portalone", Password = "GamePass1" }).ConfigureAwait(false);
             var second = await service.LoginAsync(new PlayerLoginRequest { LoginName = "portaltwo", Password = "GamePass2" }).ConfigureAwait(false);
@@ -116,6 +116,11 @@ public sealed class PlayerPortalPostgreSqlTests
             await verify.OpenAsync().ConfigureAwait(false);
             await using var rows = new NpgsqlCommand("SELECT count(*) FROM data.\"Account\" WHERE \"LoginName\" IN ('portalone', 'portaltwo')", verify);
             Assert.That(await rows.ExecuteScalarAsync().ConfigureAwait(false), Is.EqualTo(2L));
+            await using var acceptance = new NpgsqlCommand("SELECT \"TermsAcceptedVersion\", \"TermsAcceptedAtUtc\" FROM data.\"Account\" WHERE \"LoginName\" = 'portalone'", verify);
+            await using var acceptanceRow = await acceptance.ExecuteReaderAsync().ConfigureAwait(false);
+            Assert.That(await acceptanceRow.ReadAsync().ConfigureAwait(false), Is.True);
+            Assert.That(acceptanceRow.GetString(0), Is.EqualTo(PlayerPortalApiDefaults.RequiredTermsVersion));
+            Assert.That(acceptanceRow.GetDateTime(1).Kind, Is.EqualTo(DateTimeKind.Utc));
         }
         finally
         {
@@ -147,6 +152,14 @@ public sealed class PlayerPortalPostgreSqlTests
     }
 
     private static string QuoteIdentifier(string identifier) => $"\"{identifier.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
+
+    private static PlayerPortalRegistrationRequest Registration(string loginName, string password) => new()
+    {
+        LoginName = loginName,
+        Password = password,
+        TermsAccepted = true,
+        TermsVersion = PlayerPortalApiDefaults.RequiredTermsVersion,
+    };
 
     private static async Task<PlayerAccountSnapshot> RequestMeAsync(PlayerPortalService service, PlayerSessionStore sessions, string token, string tamperedLoginName)
     {

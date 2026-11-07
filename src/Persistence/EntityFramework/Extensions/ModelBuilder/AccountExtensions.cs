@@ -23,5 +23,6 @@ internal static class AccountExtensions
         builder.HasIndex(account => account.LoginName).IsUnique();
 
         builder.Property(account => account.LanguageIsoCode).HasMaxLength(3).IsRequired().HasDefaultValue("en");
+        builder.Property(account => account.TermsAcceptedVersion).HasMaxLength(64);
     }
 }

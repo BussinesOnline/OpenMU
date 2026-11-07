@@ -52,7 +52,7 @@ public sealed class PlayerPortalApiTests
         this._registrations = new AccountRegistrationService(this._persistence, this._configuration);
         this._sessions = new PlayerSessionStore(this._time);
         this._attempts = new PlayerLoginAttemptLimiter(this._time);
-        this._service = new PlayerPortalService(this._persistence, this._configuration, this._registrations, this._sessions, this._attempts);
+        this._service = new PlayerPortalService(this._persistence, this._configuration, this._registrations, this._sessions, this._attempts, this._time);
     }
 
     /// <summary>A valid account uses BCrypt persistence accepted by the same native player authentication method.</summary>
@@ -66,6 +66,9 @@ public sealed class PlayerPortalApiTests
         var account = await context.GetAccountByLoginNameAsync("portaluser").ConfigureAwait(false);
         Assert.That(account, Is.Not.Null);
         Assert.That(BCrypt.Net.BCrypt.Verify("GamePass1", account!.PasswordHash), Is.True);
+        Assert.That(account.TermsAcceptedVersion, Is.EqualTo(PlayerPortalApiDefaults.RequiredTermsVersion));
+        Assert.That(account.TermsAcceptedAtUtc, Is.EqualTo(this._time.GetUtcNow().UtcDateTime));
+        Assert.That(account.TermsAcceptedAtUtc!.Value.Kind, Is.EqualTo(DateTimeKind.Utc));
         Assert.That(await context.AuthenticateAsync("portaluser", "GamePass1").ConfigureAwait(false), Is.EqualTo(AccountState.Normal));
     }
 
@@ -80,6 +83,25 @@ public sealed class PlayerPortalApiTests
         using var context = this._persistence.CreateNewPlayerContext(new GameConfiguration());
         Assert.That(await context.AuthenticateAsync("portaluser", "GamePass1").ConfigureAwait(false), Is.EqualTo(AccountState.Normal));
         Assert.That(await context.AuthenticateAsync("portaluser", "Changed22").ConfigureAwait(false), Is.Null);
+    }
+
+    /// <summary>Missing, declined, and stale terms acceptance cannot create an account.</summary>
+    [Test]
+    public async Task RegistrationRequiresCurrentTermsAcceptanceAsync()
+    {
+        var declined = Registration("declined", "GamePass1");
+        declined.TermsAccepted = false;
+        var stale = Registration("stale", "GamePass1");
+        stale.TermsVersion = "old-terms-version";
+        var missing = Registration("missing", "GamePass1");
+        missing.TermsAccepted = null;
+
+        Assert.That(await this._service.RegisterAsync(declined).ConfigureAwait(false), Is.EqualTo(AccountRegistrationStatus.Invalid));
+        Assert.That(await this._service.RegisterAsync(stale).ConfigureAwait(false), Is.EqualTo(AccountRegistrationStatus.Invalid));
+        Assert.That(await this._service.RegisterAsync(missing).ConfigureAwait(false), Is.EqualTo(AccountRegistrationStatus.Invalid));
+        Assert.That(await this.GetAccountAsync("declined").ConfigureAwait(false), Is.Null);
+        Assert.That(await this.GetAccountAsync("stale").ConfigureAwait(false), Is.Null);
+        Assert.That(await this.GetAccountAsync("missing").ConfigureAwait(false), Is.Null);
     }
 
     /// <summary>Correct and incorrect passwords produce native authentication outcomes with no account disclosure.</summary>
@@ -209,9 +231,13 @@ public sealed class PlayerPortalApiTests
 
         var created = await controller.RegisterAsync(Registration("portaluser", "GamePass1"), CancellationToken.None).ConfigureAwait(false);
         var duplicate = await controller.RegisterAsync(Registration("portaluser", "Changed22"), CancellationToken.None).ConfigureAwait(false);
+        var declined = Registration("declined", "GamePass1");
+        declined.TermsAccepted = false;
+        var declinedResult = await controller.RegisterAsync(declined, CancellationToken.None).ConfigureAwait(false);
 
         Assert.That(created, Is.InstanceOf<AcceptedResult>());
         Assert.That(duplicate, Is.InstanceOf<AcceptedResult>());
+        Assert.That(declinedResult, Is.InstanceOf<BadRequestObjectResult>());
         Assert.That(((AcceptedResult)created).Value, Is.EqualTo(((AcceptedResult)duplicate).Value));
     }
 
@@ -266,7 +292,13 @@ public sealed class PlayerPortalApiTests
         Assert.That(loggerProvider.Messages.Any(message => message.Contains(workerSecret, StringComparison.Ordinal)), Is.False);
     }
 
-    private static AccountRegistration Registration(string loginName, string password) => new() { LoginName = loginName, Password = password };
+    private static PlayerPortalRegistrationRequest Registration(string loginName, string password) => new()
+    {
+        LoginName = loginName,
+        Password = password,
+        TermsAccepted = true,
+        TermsVersion = PlayerPortalApiDefaults.RequiredTermsVersion,
+    };
 
     private static async Task<AuthenticateResult> AuthenticateWorkerAsync(string configuredSecret, string? presentedCredential, IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory loggerFactory)
     {

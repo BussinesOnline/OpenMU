@@ -24,7 +24,7 @@ public sealed class PlayerPortalController(PlayerPortalService players, PlayerSe
     [HttpPost("accounts")]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> RegisterAsync([FromBody] AccountRegistration registration, CancellationToken cancellationToken)
+    public async Task<IActionResult> RegisterAsync([FromBody] PlayerPortalRegistrationRequest registration, CancellationToken cancellationToken)
     {
         var result = await players.RegisterAsync(registration, cancellationToken).ConfigureAwait(false);
         return result == AccountRegistrationStatus.Invalid

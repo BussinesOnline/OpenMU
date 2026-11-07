@@ -185,6 +185,8 @@ internal sealed class BasicModelConverter
         }
 
         target.RegistrationDate = source.RegistrationDate;
+        target.TermsAcceptedVersion = source.TermsAcceptedVersion;
+        target.TermsAcceptedAtUtc = source.TermsAcceptedAtUtc;
         target.State = source.State;
         target.TimeZone = source.TimeZone;
         target.VaultPassword = source.VaultPassword;

@@ -43,8 +43,26 @@ public sealed class AccountRegistrationService(IPersistenceContextProvider persi
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The registration outcome.</returns>
     public async ValueTask<AccountRegistrationStatus> RegisterAsync(AccountRegistration registration, CancellationToken cancellationToken = default)
+        => await this.RegisterCoreAsync(registration, null, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>Validates and creates a normal account with server-recorded player portal terms acceptance.</summary>
+    /// <param name="registration">The game-compatible account registration.</param>
+    /// <param name="termsAcceptance">The immutable revision and server-generated UTC timestamp accepted by the user.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The registration outcome.</returns>
+    public ValueTask<AccountRegistrationStatus> RegisterPlayerPortalAsync(AccountRegistration registration, AccountTermsAcceptance termsAcceptance, CancellationToken cancellationToken = default)
     {
-        if (!IsValid(registration))
+        ArgumentNullException.ThrowIfNull(termsAcceptance);
+        return this.RegisterCoreAsync(registration, termsAcceptance, cancellationToken);
+    }
+
+    private async ValueTask<AccountRegistrationStatus> RegisterCoreAsync(AccountRegistration registration, AccountTermsAcceptance? termsAcceptance, CancellationToken cancellationToken)
+    {
+        if (!IsValid(registration)
+            || (termsAcceptance is not null
+                && (string.IsNullOrWhiteSpace(termsAcceptance.Version)
+                    || termsAcceptance.Version.Length > 64
+                    || termsAcceptance.AcceptedAtUtc.Kind != DateTimeKind.Utc)))
         {
             return AccountRegistrationStatus.Invalid;
         }
@@ -63,6 +81,8 @@ public sealed class AccountRegistrationService(IPersistenceContextProvider persi
         account.PasswordHash = BCrypt.Net.BCrypt.HashPassword(registration.Password);
         account.State = AccountState.Normal;
         account.RegistrationDate = DateTime.UtcNow;
+        account.TermsAcceptedVersion = termsAcceptance?.Version;
+        account.TermsAcceptedAtUtc = termsAcceptance?.AcceptedAtUtc;
         try
         {
             if (!await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false))

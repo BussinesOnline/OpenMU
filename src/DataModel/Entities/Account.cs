@@ -97,6 +97,17 @@ public class Account
     public DateTime RegistrationDate { get; set; } = DateTime.UtcNow;
 
     /// <summary>
+    /// Gets or sets the version of the terms accepted when the account was registered through the player portal.
+    /// </summary>
+    [StringLength(64)]
+    public string? TermsAcceptedVersion { get; set; }
+
+    /// <summary>
+    /// Gets or sets the UTC date and time when the account owner accepted the terms in the player portal.
+    /// </summary>
+    public DateTime? TermsAcceptedAtUtc { get; set; }
+
+    /// <summary>
     /// Gets or sets the state.
     /// </summary>
     public AccountState State { get; set; }

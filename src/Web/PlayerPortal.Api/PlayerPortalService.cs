@@ -20,7 +20,8 @@ public sealed class PlayerPortalService(
     IDataSource<GameConfiguration> configurations,
     AccountRegistrationService registrations,
     PlayerSessionStore sessions,
-    PlayerLoginAttemptLimiter attempts)
+    PlayerLoginAttemptLimiter attempts,
+    TimeProvider timeProvider)
 {
     private static readonly string DummyPasswordHash = BCrypt.Net.BCrypt.HashPassword("not-a-real-player-password", workFactor: 11);
     private static readonly Guid LevelDefinitionId = Stats.Level.Id;
@@ -29,8 +30,18 @@ public sealed class PlayerPortalService(
     /// <summary>Creates an account through the same validation, storage, and BCrypt path as the existing OpenMU admin operation.</summary>
     /// <param name="registration">The new player account registration.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    public ValueTask<AccountRegistrationStatus> RegisterAsync(AccountRegistration registration, CancellationToken cancellationToken = default)
-        => registrations.RegisterAsync(registration, cancellationToken);
+    public ValueTask<AccountRegistrationStatus> RegisterAsync(PlayerPortalRegistrationRequest registration, CancellationToken cancellationToken = default)
+    {
+        if (registration.TermsAccepted != true
+            || !string.Equals(registration.TermsVersion, PlayerPortalApiDefaults.RequiredTermsVersion, StringComparison.Ordinal)
+            || !AccountRegistrationService.IsValid(registration.ToAccountRegistration()))
+        {
+            return ValueTask.FromResult(AccountRegistrationStatus.Invalid);
+        }
+
+        var acceptance = new AccountTermsAcceptance(registration.TermsVersion, timeProvider.GetUtcNow().UtcDateTime);
+        return registrations.RegisterPlayerPortalAsync(registration.ToAccountRegistration(), acceptance, cancellationToken);
+    }
 
     /// <summary>Verifies native OpenMU credentials and creates a fixed-expiry owner-bound portal session.</summary>
     /// <param name="request">The submitted game-compatible credentials.</param>
