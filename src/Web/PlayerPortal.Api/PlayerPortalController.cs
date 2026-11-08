@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using MUnique.OpenMU.Web.AdminPanel.API;
 using MUnique.OpenMU.Web.AdminPanel.Operations;
+using MUnique.OpenMU.Web.AdminPanel.Services;
 
 /// <summary>Private player account API. Every route requires the trusted Worker service identity.</summary>
 [ApiController]
@@ -72,6 +73,50 @@ public sealed class PlayerPortalController(PlayerPortalService players, PlayerSe
         }
 
         return this.Ok(account);
+    }
+
+    /// <summary>Grants cash shop coins idempotently to an account.</summary>
+    /// <param name="request">The grant request.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    [HttpPost("cash-shop/grants")]
+    [ProducesResponseType(typeof(CashShopCoinGrantInfo), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(CashShopCoinGrantInfo), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> GrantCoinsAsync([FromBody] PlayerPortalCoinGrantRequest request, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.LoginName) || string.IsNullOrWhiteSpace(request.Reference))
+        {
+            return this.BadRequest(new { error = "invalid_grant_request" });
+        }
+
+        if (request.Amount <= 0)
+        {
+            return this.BadRequest(new { error = "amount_must_be_positive" });
+        }
+
+        if (!Enum.IsDefined(request.CoinType))
+        {
+            return this.BadRequest(new { error = "unknown_coin_type" });
+        }
+
+        var (status, grant) = await players.GrantCoinsAsync(
+            request.LoginName,
+            request.CoinType,
+            request.Amount,
+            request.Reference,
+            request.Reason,
+            cancellationToken).ConfigureAwait(false);
+
+        return status switch
+        {
+            CashShopCoinGrantStatus.Created => this.StatusCode(StatusCodes.Status201Created, grant),
+            CashShopCoinGrantStatus.AlreadyGranted => this.Ok(grant),
+            CashShopCoinGrantStatus.AccountNotFound => this.NotFound(new { error = "account_not_found" }),
+            CashShopCoinGrantStatus.ReferenceUsedByOtherAccount => this.Conflict(new { error = "reference_used_by_other_account" }),
+            _ => this.StatusCode(StatusCodes.Status500InternalServerError, new { error = "grant_failed" }),
+        };
     }
 
     /// <summary>Revokes the presented session. The operation is idempotent to simplify Worker cookie clearing.</summary>

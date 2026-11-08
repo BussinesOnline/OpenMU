@@ -13,6 +13,7 @@ using MUnique.OpenMU.Interfaces;
 using MUnique.OpenMU.Persistence;
 using MUnique.OpenMU.Web.AdminPanel.API;
 using MUnique.OpenMU.Web.AdminPanel.Operations;
+using MUnique.OpenMU.Web.AdminPanel.Services;
 
 /// <summary>Implements player-only operations over OpenMU account persistence.</summary>
 public sealed class PlayerPortalService(
@@ -164,6 +165,25 @@ public sealed class PlayerPortalService(
             pendingWCoinP,
             pendingGoblinPoints,
             vaultBalances);
+    }
+
+    /// <summary>Grants cash shop coins to an account through native CashShopCoinGrant persistence idempotently.</summary>
+    /// <param name="loginName">The login name of the target account.</param>
+    /// <param name="coinType">The coin type.</param>
+    /// <param name="amount">The coin amount (positive integer).</param>
+    /// <param name="reference">The idempotency reference identifier.</param>
+    /// <param name="reason">The reason for the grant.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public async ValueTask<(CashShopCoinGrantStatus Status, CashShopCoinGrantInfo? Grant)> GrantCoinsAsync(
+        string loginName,
+        CashShopCoinType coinType,
+        int amount,
+        string reference,
+        string? reason,
+        CancellationToken cancellationToken = default)
+    {
+        var coinService = new CashShopCoinService(persistence, configurations);
+        return await coinService.GrantAsync(loginName, coinType, amount, reason, reference, "PlayerPortalBff", cancellationToken).ConfigureAwait(false);
     }
 
     private static int ReadStat(float value) => float.IsFinite(value) ? (int)Math.Clamp(value, 0, int.MaxValue) : 0;

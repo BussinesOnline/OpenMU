@@ -25,6 +25,7 @@ using MUnique.OpenMU.Persistence;
 using MUnique.OpenMU.Persistence.InMemory;
 using MUnique.OpenMU.Web.AdminPanel.API;
 using MUnique.OpenMU.Web.AdminPanel.Operations;
+using MUnique.OpenMU.Web.AdminPanel.Services;
 using MUnique.OpenMU.Web.PlayerPortal.Api;
 
 /// <summary>Regression tests for isolated player-only account operations over OpenMU's in-memory persistence.</summary>
@@ -455,6 +456,90 @@ public sealed class PlayerPortalApiTests
 
         var result = await controller.GetOwnAccountAsync(CancellationToken.None).ConfigureAwait(false);
         Assert.That(result, Is.InstanceOf<UnauthorizedObjectResult>());
+    }
+
+    /// <summary>The cash shop grant endpoint creates a pending grant and confirms idempotency on repeated references.</summary>
+    [Test]
+    public async Task GrantCoinsCreatesPendingGrantAndEnforcesIdempotencyAsync()
+    {
+        await this._service.RegisterAsync(Registration("charlie", "GamePass1")).ConfigureAwait(false);
+        var controller = new PlayerPortalController(this._service, this._sessions)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
+        };
+
+        var request = new PlayerPortalCoinGrantRequest("charlie", CashShopCoinType.WCoinC, 500, "ord_ref_100", "Order ord_100");
+        var firstResult = await controller.GrantCoinsAsync(request, CancellationToken.None).ConfigureAwait(false);
+        Assert.That(firstResult, Is.InstanceOf<ObjectResult>());
+        var createdStatus = ((ObjectResult)firstResult).StatusCode;
+        Assert.That(createdStatus, Is.EqualTo(StatusCodes.Status201Created));
+        var firstGrant = (CashShopCoinGrantInfo)((ObjectResult)firstResult).Value!;
+        Assert.That(firstGrant.Amount, Is.EqualTo(500));
+        Assert.That(firstGrant.Reference, Is.EqualTo("ord_ref_100"));
+
+        // Second call with same reference must return 200 OK with identical grant info (idempotent)
+        var secondResult = await controller.GrantCoinsAsync(request, CancellationToken.None).ConfigureAwait(false);
+        Assert.That(secondResult, Is.InstanceOf<OkObjectResult>());
+        var secondGrant = (CashShopCoinGrantInfo)((OkObjectResult)secondResult).Value!;
+        Assert.That(secondGrant.Amount, Is.EqualTo(500));
+        Assert.That(secondGrant.Reference, Is.EqualTo("ord_ref_100"));
+    }
+
+    /// <summary>The grant endpoint rejects negative/zero amounts and invalid coin types with 400 Bad Request.</summary>
+    [Test]
+    public async Task GrantCoinsRejectsInvalidAmountOrUnknownCoinTypeAsync()
+    {
+        await this._service.RegisterAsync(Registration("charlie2", "GamePass1")).ConfigureAwait(false);
+        var controller = new PlayerPortalController(this._service, this._sessions)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
+        };
+
+        var zeroAmountReq = new PlayerPortalCoinGrantRequest("charlie2", CashShopCoinType.WCoinC, 0, "ref_zero", "Zero");
+        var zeroRes = await controller.GrantCoinsAsync(zeroAmountReq, CancellationToken.None).ConfigureAwait(false);
+        Assert.That(zeroRes, Is.InstanceOf<BadRequestObjectResult>());
+
+        var negativeAmountReq = new PlayerPortalCoinGrantRequest("charlie2", CashShopCoinType.WCoinC, -100, "ref_neg", "Neg");
+        var negRes = await controller.GrantCoinsAsync(negativeAmountReq, CancellationToken.None).ConfigureAwait(false);
+        Assert.That(negRes, Is.InstanceOf<BadRequestObjectResult>());
+
+        var invalidCoinReq = new PlayerPortalCoinGrantRequest("charlie2", (CashShopCoinType)999, 100, "ref_coin", "Invalid");
+        var coinRes = await controller.GrantCoinsAsync(invalidCoinReq, CancellationToken.None).ConfigureAwait(false);
+        Assert.That(coinRes, Is.InstanceOf<BadRequestObjectResult>());
+    }
+
+    /// <summary>The grant endpoint returns 404 Not Found when the target account does not exist.</summary>
+    [Test]
+    public async Task GrantCoinsReturnsNotFoundForMissingAccountAsync()
+    {
+        var controller = new PlayerPortalController(this._service, this._sessions)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
+        };
+
+        var request = new PlayerPortalCoinGrantRequest("nonexistent_user", CashShopCoinType.WCoinC, 500, "ref_missing", "Test");
+        var result = await controller.GrantCoinsAsync(request, CancellationToken.None).ConfigureAwait(false);
+        Assert.That(result, Is.InstanceOf<NotFoundObjectResult>());
+    }
+
+    /// <summary>The grant endpoint returns 409 Conflict when a reference was already used by another account.</summary>
+    [Test]
+    public async Task GrantCoinsReturnsConflictWhenReferenceBelongsToAnotherAccountAsync()
+    {
+        await this._service.RegisterAsync(Registration("user_one", "GamePass1")).ConfigureAwait(false);
+        await this._service.RegisterAsync(Registration("user_two", "GamePass1")).ConfigureAwait(false);
+        var controller = new PlayerPortalController(this._service, this._sessions)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
+        };
+
+        var grantOne = new PlayerPortalCoinGrantRequest("user_one", CashShopCoinType.WCoinC, 500, "shared_ref_conflict", "One");
+        var resOne = await controller.GrantCoinsAsync(grantOne, CancellationToken.None).ConfigureAwait(false);
+        Assert.That(((ObjectResult)resOne).StatusCode, Is.EqualTo(StatusCodes.Status201Created));
+
+        var grantTwo = new PlayerPortalCoinGrantRequest("user_two", CashShopCoinType.WCoinC, 500, "shared_ref_conflict", "Two");
+        var resTwo = await controller.GrantCoinsAsync(grantTwo, CancellationToken.None).ConfigureAwait(false);
+        Assert.That(resTwo, Is.InstanceOf<ConflictObjectResult>());
     }
 
     private static AccountRegistration Registration(string loginName, string password) => new() { LoginName = loginName, Password = password };
