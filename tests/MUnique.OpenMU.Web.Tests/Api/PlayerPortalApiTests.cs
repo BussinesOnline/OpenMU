@@ -307,6 +307,80 @@ public sealed class PlayerPortalApiTests
         Assert.That(response.VaultBalances.PendingGoblinPoints, Is.EqualTo(0));
     }
 
+    /// <summary>Pending grants are not limited or truncated by 50 latest grants, and applied grants are never counted as pending.</summary>
+    [Test]
+    public async Task GetOwnAccountConsidersAllPendingGrantsBeyondFiftyAndIgnoresAppliedGrantsAsync()
+    {
+        await this._service.RegisterAsync(Registration("volumeuser", "GamePass1")).ConfigureAwait(false);
+        var account = await this.GetAccountAsync("volumeuser").ConfigureAwait(false);
+        var accountId = account!.GetId();
+
+        await this.SetAccountBalancesAsync("volumeuser", 5000, 2000, 1000).ConfigureAwait(false);
+
+        // Add 60 applied grants (which would push pending grants out if using a 50 latest query)
+        for (var i = 0; i < 60; i++)
+        {
+            await this.AddCashShopCoinGrantAsync(
+                accountId,
+                CashShopCoinType.WCoinC,
+                100,
+                appliedAt: DateTime.UtcNow.AddMinutes(-120 + i)).ConfigureAwait(false);
+        }
+
+        // Add 5 pending grants of WCoinC (5 * 50 = 250)
+        for (var i = 0; i < 5; i++)
+        {
+            await this.AddCashShopCoinGrantAsync(
+                accountId,
+                CashShopCoinType.WCoinC,
+                50,
+                appliedAt: null).ConfigureAwait(false);
+        }
+
+        // Add 5 pending grants of WCoinP (5 * 30 = 150)
+        for (var i = 0; i < 5; i++)
+        {
+            await this.AddCashShopCoinGrantAsync(
+                accountId,
+                CashShopCoinType.WCoinP,
+                30,
+                appliedAt: null).ConfigureAwait(false);
+        }
+
+        // Add 1 pending grant of GoblinPoints (25)
+        await this.AddCashShopCoinGrantAsync(
+            accountId,
+            CashShopCoinType.GoblinPoints,
+            25,
+            appliedAt: null).ConfigureAwait(false);
+
+        var session = this._sessions.Create(accountId, SessionLifetime);
+        var controller = new PlayerPortalController(this._service, this._sessions)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
+        };
+        controller.Request.Headers[PlayerPortalApiDefaults.SessionHeaderName] = session.Token;
+
+        var result = await controller.GetOwnAccountAsync(CancellationToken.None).ConfigureAwait(false);
+        Assert.That(result, Is.InstanceOf<OkObjectResult>());
+
+        var response = (PlayerAccountSnapshot)((OkObjectResult)result).Value!;
+        Assert.That(response.LoginName, Is.EqualTo("volumeuser"));
+        Assert.That(response.WCoinC, Is.EqualTo(5000));
+        Assert.That(response.WCoinP, Is.EqualTo(2000));
+        Assert.That(response.GoblinPoints, Is.EqualTo(1000));
+
+        // Total 250 pending WCoinC, none of the 60 applied grants (60 * 100) are counted as pending
+        Assert.That(response.PendingWCoinC, Is.EqualTo(250));
+        Assert.That(response.PendingWCoinP, Is.EqualTo(150));
+        Assert.That(response.PendingGoblinPoints, Is.EqualTo(25));
+
+        Assert.That(response.VaultBalances, Is.Not.Null);
+        Assert.That(response.VaultBalances!.PendingWCoinC, Is.EqualTo(250));
+        Assert.That(response.VaultBalances.PendingWCoinP, Is.EqualTo(150));
+        Assert.That(response.VaultBalances.PendingGoblinPoints, Is.EqualTo(25));
+    }
+
     /// <summary>An account without coins or grants returns explicit zeros instead of omitted or null balances.</summary>
     [Test]
     public async Task GetOwnAccountZeroBalancesWhenAccountHasNoCoinsOrGrantsAsync()

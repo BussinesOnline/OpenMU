@@ -18,3 +18,4 @@ public sealed record PlayerAccountVaultBalances(
     int PendingWCoinC,
     int PendingWCoinP,
     int PendingGoblinPoints);
+

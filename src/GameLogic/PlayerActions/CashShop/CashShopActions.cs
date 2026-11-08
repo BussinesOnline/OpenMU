@@ -1,4 +1,4 @@
-﻿// <copyright file="CashShopActions.cs" company="MUnique">
+// <copyright file="CashShopActions.cs" company="MUnique">
 // Licensed under the MIT License. See LICENSE file in the project root for full license information.
 // </copyright>
 
@@ -310,9 +310,14 @@ public class CashShopActions
                 return PurchaseResult.InvalidPriceOption;
             }
 
-            if (IsProhibitedPackage(package) || !package.IsForSale || products.Any(product => !CashShopProductDelivery.CanDeliver(player.GameContext, product)))
+            if (IsProhibitedPackage(package))
             {
                 package.IsForSale = false;
+                return PurchaseResult.NotForSale;
+            }
+
+            if (!package.IsForSale || products.Any(product => !CashShopProductDelivery.CanDeliver(player.GameContext, product)))
+            {
                 return PurchaseResult.NotForSale;
             }
 

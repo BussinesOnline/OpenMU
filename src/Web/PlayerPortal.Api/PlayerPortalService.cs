@@ -121,18 +121,13 @@ public sealed class PlayerPortalService(
             })
             .ToArray();
 
-        var grants = await context.GetLatestCashShopCoinGrantsAsync(ownerAccountId, 50, cancellationToken).ConfigureAwait(false);
+        var pendingGrants = await context.GetPendingCashShopCoinGrantsAsync(ownerAccountId, cancellationToken).ConfigureAwait(false);
         var pendingWCoinC = 0;
         var pendingWCoinP = 0;
         var pendingGoblinPoints = 0;
 
-        foreach (var grant in grants)
+        foreach (var grant in pendingGrants)
         {
-            if (grant.AppliedAt is not null)
-            {
-                continue;
-            }
-
             switch (grant.CoinType)
             {
                 case CashShopCoinType.WCoinC:

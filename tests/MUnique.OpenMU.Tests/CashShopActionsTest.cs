@@ -1,4 +1,4 @@
-﻿// <copyright file="CashShopActionsTest.cs" company="MUnique">
+// <copyright file="CashShopActionsTest.cs" company="MUnique">
 // Licensed under the MIT License. See LICENSE file in the project root for full license information.
 // </copyright>
 
@@ -266,6 +266,35 @@ public class CashShopActionsTest
         GetView(player).Verify(v => v.ShowGiftResultAsync(CashShopGiftResult.NotForSale), Times.Once);
         Assert.That(player.Account.GoblinPoints, Is.EqualTo(10000));
         Assert.That(kundunPackage.IsForSale, Is.False);
+    }
+
+    /// <summary>
+    /// Tests that a delivery failure for a legitimate package does not disable its IsForSale property.
+    /// </summary>
+    [Test]
+    public async Task DeliveryFailureDoesNotDisableIsForSaleOnLegitimatePackageAsync()
+    {
+        var player = await this.CreateOpenedCashShopPlayerAsync().ConfigureAwait(false);
+        player.Account!.WCoinC = 1000;
+
+        const int legitimatePackageSequence = 888;
+        var legitimatePackage = CreatePackage(legitimatePackageSequence, CashShopCoinType.WCoinC, 0, isBundle: false);
+        legitimatePackage.IsForSale = true;
+        legitimatePackage.Products.Add(new BasicModel.CashShopProduct
+        {
+            ProductSequence = 999,
+            PriceSequence = 1,
+            Price = 200,
+            Quantity = 1,
+            ItemDefinition = null,
+        });
+        player.GameContext.Configuration.CashShopConfiguration!.Packages.Add(legitimatePackage);
+
+        await this._actions.BuyAsync(player, legitimatePackageSequence, 1, CashShopCoinType.WCoinC).ConfigureAwait(false);
+
+        GetView(player).Verify(v => v.ShowBuyResultAsync(CashShopBuyResult.NotForSale), Times.Once);
+        Assert.That(player.Account.WCoinC, Is.EqualTo(1000));
+        Assert.That(legitimatePackage.IsForSale, Is.True, "Legitimate package must not be disabled due to delivery failure");
     }
 
     /// <summary>
