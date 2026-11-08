@@ -191,6 +191,34 @@ public class MiniGameRejoinTests
         Assert.That(remainingPlayer.Money, Is.EqualTo(1000));
     }
 
+    /// <summary>
+    /// Tests that the client receives the current mini game state on entry and every state transition.
+    /// </summary>
+    [Test]
+    public async Task MiniGameStateTransitionsAreSentToPlayersAsync()
+    {
+        var player = await PlayerTestHelper.CreatePlayerAsync().ConfigureAwait(false);
+        var definition = CreateDefinition(player.GameContext, MiniGameType.DevilSquare);
+        var game = new DevilSquareContext(new MiniGameMapKey(0, 0, string.Empty), definition, player.GameContext, CreateMapInitializer());
+        this._gamesToDispose.Add(game);
+        game.EnsureGameLoopRunning();
+
+        var stateView = Mock.Get(player.ViewPlugIns.GetPlugIn<IUpdateMiniGameStateViewPlugIn>()!);
+        await EnterAsync(game, player).ConfigureAwait(false);
+        await WaitUntilAsync(() => WasStateSent(stateView, MiniGameState.Open)).ConfigureAwait(false);
+
+        await SkipUntilPlayingAsync(game).ConfigureAwait(false);
+        await WaitUntilAsync(() => WasStateSent(stateView, MiniGameState.Playing)).ConfigureAwait(false);
+
+        typeof(MiniGameContext).GetMethod("FinishEvent", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(game, null);
+        await WaitUntilAsync(() => game.State == MiniGameState.Ended && WasStateSent(stateView, MiniGameState.Ended)).ConfigureAwait(false);
+
+        stateView.Verify(view => view.UpdateStateAsync(MiniGameType.DevilSquare, MiniGameState.Open), Times.Once);
+        stateView.Verify(view => view.UpdateStateAsync(MiniGameType.DevilSquare, MiniGameState.Closed), Times.Once);
+        stateView.Verify(view => view.UpdateStateAsync(MiniGameType.DevilSquare, MiniGameState.Playing), Times.Once);
+        stateView.Verify(view => view.UpdateStateAsync(MiniGameType.DevilSquare, MiniGameState.Ended), Times.Once);
+    }
+
     private static MiniGameDefinition CreateDefinition(IGameContext gameContext, MiniGameType type, params MiniGameChangeEvent[] changeEvents)
     {
         var mapDefinition = gameContext.Configuration.Maps.First(m => m.Number == 0);
@@ -220,6 +248,13 @@ public class MiniGameRejoinTests
     private static bool IsSingleArea(IReadOnlyCollection<(byte StartX, byte StartY, byte EndX, byte EndY)> areas, byte startX, byte startY, byte endX, byte endY)
     {
         return areas.Count == 1 && areas.Single() == (startX, startY, endX, endY);
+    }
+
+    private static bool WasStateSent(Mock<IUpdateMiniGameStateViewPlugIn> view, MiniGameState state)
+    {
+        return view.Invocations.Any(invocation => invocation.Method.Name == nameof(IUpdateMiniGameStateViewPlugIn.UpdateStateAsync)
+            && invocation.Arguments.Count == 2
+            && Equals(invocation.Arguments[1], state));
     }
 
     private static async Task EnterAsync(MiniGameContext game, Player player)
