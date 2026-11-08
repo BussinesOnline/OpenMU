@@ -246,7 +246,7 @@ public class PlayerInMemoryContext : InMemoryContext, IPlayerContext
                 .ToArray()
             : Array.Empty<AccountCharacterOverview>();
 
-        return new AccountOverview(account.LoginName, account.State, characters);
+        return new AccountOverview(account.LoginName, account.State, characters, account.WCoinC, account.WCoinP, account.GoblinPoints);
     }
 
     private static float GetAttributeValue(DataModel.Entities.Character character, Guid definitionId)

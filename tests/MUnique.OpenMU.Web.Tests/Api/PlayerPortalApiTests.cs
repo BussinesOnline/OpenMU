@@ -266,6 +266,123 @@ public sealed class PlayerPortalApiTests
         Assert.That(loggerProvider.Messages.Any(message => message.Contains(workerSecret, StringComparison.Ordinal)), Is.False);
     }
 
+    /// <summary>The /me endpoint returns real available balances and isolates pending grants awaiting GameServer application.</summary>
+    [Test]
+    public async Task GetOwnAccountReturnsBalancesAndSeparatesPendingGrantsAsync()
+    {
+        await this._service.RegisterAsync(Registration("richard", "GamePass1")).ConfigureAwait(false);
+        var account = await this.GetAccountAsync("richard").ConfigureAwait(false);
+        var accountId = account!.GetId();
+
+        await this.SetAccountBalancesAsync("richard", 1500, 400, 120).ConfigureAwait(false);
+        await this.AddCashShopCoinGrantAsync(accountId, CashShopCoinType.WCoinC, 500, appliedAt: null).ConfigureAwait(false);
+        await this.AddCashShopCoinGrantAsync(accountId, CashShopCoinType.WCoinP, 100, appliedAt: null).ConfigureAwait(false);
+        await this.AddCashShopCoinGrantAsync(accountId, CashShopCoinType.WCoinC, 2000, appliedAt: DateTime.UtcNow).ConfigureAwait(false);
+
+        var session = this._sessions.Create(accountId, SessionLifetime);
+        var controller = new PlayerPortalController(this._service, this._sessions)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
+        };
+        controller.Request.Headers[PlayerPortalApiDefaults.SessionHeaderName] = session.Token;
+
+        var result = await controller.GetOwnAccountAsync(CancellationToken.None).ConfigureAwait(false);
+        Assert.That(result, Is.InstanceOf<OkObjectResult>());
+
+        var response = (PlayerAccountSnapshot)((OkObjectResult)result).Value!;
+        Assert.That(response.LoginName, Is.EqualTo("richard"));
+        Assert.That(response.WCoinC, Is.EqualTo(1500));
+        Assert.That(response.WCoinP, Is.EqualTo(400));
+        Assert.That(response.GoblinPoints, Is.EqualTo(120));
+        Assert.That(response.PendingWCoinC, Is.EqualTo(500));
+        Assert.That(response.PendingWCoinP, Is.EqualTo(100));
+        Assert.That(response.PendingGoblinPoints, Is.EqualTo(0));
+
+        Assert.That(response.VaultBalances, Is.Not.Null);
+        Assert.That(response.VaultBalances!.WCoinC, Is.EqualTo(1500));
+        Assert.That(response.VaultBalances.WCoinP, Is.EqualTo(400));
+        Assert.That(response.VaultBalances.GoblinPoints, Is.EqualTo(120));
+        Assert.That(response.VaultBalances.PendingWCoinC, Is.EqualTo(500));
+        Assert.That(response.VaultBalances.PendingWCoinP, Is.EqualTo(100));
+        Assert.That(response.VaultBalances.PendingGoblinPoints, Is.EqualTo(0));
+    }
+
+    /// <summary>An account without coins or grants returns explicit zeros instead of omitted or null balances.</summary>
+    [Test]
+    public async Task GetOwnAccountZeroBalancesWhenAccountHasNoCoinsOrGrantsAsync()
+    {
+        await this._service.RegisterAsync(Registration("zerouser", "GamePass1")).ConfigureAwait(false);
+        var account = await this.GetAccountAsync("zerouser").ConfigureAwait(false);
+        var session = this._sessions.Create(account!.GetId(), SessionLifetime);
+
+        var controller = new PlayerPortalController(this._service, this._sessions)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
+        };
+        controller.Request.Headers[PlayerPortalApiDefaults.SessionHeaderName] = session.Token;
+
+        var result = await controller.GetOwnAccountAsync(CancellationToken.None).ConfigureAwait(false);
+        Assert.That(result, Is.InstanceOf<OkObjectResult>());
+
+        var response = (PlayerAccountSnapshot)((OkObjectResult)result).Value!;
+        Assert.That(response.LoginName, Is.EqualTo("zerouser"));
+        Assert.That(response.WCoinC, Is.EqualTo(0));
+        Assert.That(response.WCoinP, Is.EqualTo(0));
+        Assert.That(response.GoblinPoints, Is.EqualTo(0));
+        Assert.That(response.PendingWCoinC, Is.EqualTo(0));
+        Assert.That(response.PendingWCoinP, Is.EqualTo(0));
+        Assert.That(response.PendingGoblinPoints, Is.EqualTo(0));
+        Assert.That(response.VaultBalances, Is.Not.Null);
+        Assert.That(response.VaultBalances!.WCoinC, Is.EqualTo(0));
+    }
+
+    /// <summary>Balances and pending grants are strictly isolated to the authenticated session owner.</summary>
+    [Test]
+    public async Task GetOwnAccountStrictlyIsolatesBalancesBetweenAccountsAsync()
+    {
+        await this._service.RegisterAsync(Registration("alice", "GamePass1")).ConfigureAwait(false);
+        await this._service.RegisterAsync(Registration("bob", "GamePass2")).ConfigureAwait(false);
+
+        var alice = await this.GetAccountAsync("alice").ConfigureAwait(false);
+        var bob = await this.GetAccountAsync("bob").ConfigureAwait(false);
+
+        await this.SetAccountBalancesAsync("alice", 9999, 500, 300).ConfigureAwait(false);
+        await this.AddCashShopCoinGrantAsync(alice!.GetId(), CashShopCoinType.WCoinC, 750, appliedAt: null).ConfigureAwait(false);
+
+        var bobSession = this._sessions.Create(bob!.GetId(), SessionLifetime);
+        var controller = new PlayerPortalController(this._service, this._sessions)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
+        };
+        controller.Request.Headers[PlayerPortalApiDefaults.SessionHeaderName] = bobSession.Token;
+        controller.Request.QueryString = new QueryString($"?accountId={alice!.GetId()}");
+
+        var result = await controller.GetOwnAccountAsync(CancellationToken.None).ConfigureAwait(false);
+        var response = (PlayerAccountSnapshot)((OkObjectResult)result).Value!;
+
+        Assert.That(response.LoginName, Is.EqualTo("bob"));
+        Assert.That(response.WCoinC, Is.EqualTo(0));
+        Assert.That(response.WCoinP, Is.EqualTo(0));
+        Assert.That(response.GoblinPoints, Is.EqualTo(0));
+        Assert.That(response.PendingWCoinC, Is.EqualTo(0));
+        Assert.That(response.PendingWCoinP, Is.EqualTo(0));
+        Assert.That(response.PendingGoblinPoints, Is.EqualTo(0));
+    }
+
+    /// <summary>An unauthenticated or invalid session token is rejected with HTTP 401 Unauthorized.</summary>
+    [Test]
+    public async Task GetOwnAccountInvalidSessionReturnsUnauthorizedAsync()
+    {
+        var controller = new PlayerPortalController(this._service, this._sessions)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
+        };
+        controller.Request.Headers[PlayerPortalApiDefaults.SessionHeaderName] = "invalid-token-value-that-does-not-exist";
+
+        var result = await controller.GetOwnAccountAsync(CancellationToken.None).ConfigureAwait(false);
+        Assert.That(result, Is.InstanceOf<UnauthorizedObjectResult>());
+    }
+
     private static AccountRegistration Registration(string loginName, string password) => new() { LoginName = loginName, Password = password };
 
     private static async Task<AuthenticateResult> AuthenticateWorkerAsync(string configuredSecret, string? presentedCredential, IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory loggerFactory)
@@ -300,6 +417,28 @@ public sealed class PlayerPortalApiTests
     {
         using var context = this._persistence.CreateNewPlayerContext(new GameConfiguration());
         return await context.GetAccountByLoginNameAsync(loginName).ConfigureAwait(false);
+    }
+
+    private async Task SetAccountBalancesAsync(string loginName, int wCoinC, int wCoinP, int goblinPoints)
+    {
+        using var context = this._persistence.CreateNewPlayerContext(new GameConfiguration());
+        var account = await context.GetAccountByLoginNameAsync(loginName).ConfigureAwait(false);
+        account!.WCoinC = wCoinC;
+        account.WCoinP = wCoinP;
+        account.GoblinPoints = goblinPoints;
+        await context.SaveChangesAsync().ConfigureAwait(false);
+    }
+
+    private async Task AddCashShopCoinGrantAsync(Guid accountId, CashShopCoinType coinType, int amount, DateTime? appliedAt = null)
+    {
+        using var context = this._persistence.CreateNewPlayerContext(new GameConfiguration());
+        var grant = context.CreateNew<CashShopCoinGrant>();
+        grant.AccountId = accountId;
+        grant.CoinType = coinType;
+        grant.Amount = amount;
+        grant.CreatedAt = DateTime.UtcNow;
+        grant.AppliedAt = appliedAt;
+        await context.SaveChangesAsync().ConfigureAwait(false);
     }
 
     private sealed class TestTimeProvider(DateTimeOffset now) : TimeProvider

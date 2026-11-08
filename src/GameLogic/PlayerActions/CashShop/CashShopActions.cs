@@ -310,8 +310,9 @@ public class CashShopActions
                 return PurchaseResult.InvalidPriceOption;
             }
 
-            if (!package.IsForSale || products.Any(product => !CashShopProductDelivery.CanDeliver(player.GameContext, product)))
+            if (IsProhibitedPackage(package) || !package.IsForSale || products.Any(product => !CashShopProductDelivery.CanDeliver(player.GameContext, product)))
             {
+                package.IsForSale = false;
                 return PurchaseResult.NotForSale;
             }
 
@@ -448,5 +449,27 @@ public class CashShopActions
         products = product is null ? [] : [product];
         price = product?.Price ?? 0;
         return product is not null;
+    }
+
+    /// <summary>
+    /// Checks whether a package is prohibited by server policy (e.g. Box of Kundun +1 to +5).
+    /// </summary>
+    /// <param name="package">The cash shop package.</param>
+    /// <returns><c>true</c> if the package is prohibited from being purchased or gifted; otherwise, <c>false</c>.</returns>
+    public static bool IsProhibitedPackage(CashShopPackage package)
+    {
+        // Box of Kundun +1 to +5 packages (461-465) are prohibited by server policy
+        if (package.PackageSequence is >= 461 and <= 465)
+        {
+            return true;
+        }
+
+        // Box of Kundun items (Group 14, Number 11) cannot be sold or delivered through cash shop
+        if (package.Products.Any(p => p.ItemDefinition is { Group: 14, Number: 11 }))
+        {
+            return true;
+        }
+
+        return false;
     }
 }

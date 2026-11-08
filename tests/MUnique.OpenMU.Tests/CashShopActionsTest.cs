@@ -204,6 +204,71 @@ public class CashShopActionsTest
     }
 
     /// <summary>
+    /// Tests that prohibited packages (Box of Kundun 461-465) are rejected on buy even if an existing configuration has them marked as for sale.
+    /// </summary>
+    /// <param name="packageSequence">The package sequence (461 to 465).</param>
+    [TestCase(461)]
+    [TestCase(462)]
+    [TestCase(463)]
+    [TestCase(464)]
+    [TestCase(465)]
+    public async Task BuyProhibitedKundunBoxPackageIsRefusedEvenWhenConfiguredAsForSaleAsync(int packageSequence)
+    {
+        var player = await this.CreateOpenedCashShopPlayerAsync().ConfigureAwait(false);
+        player.Account!.GoblinPoints = 10000;
+
+        var kundunPackage = CreatePackage(packageSequence, CashShopCoinType.GoblinPoints, 0, isBundle: false);
+        kundunPackage.IsForSale = true; // Simulated legacy/unsafe database row
+        kundunPackage.Products.Add(new BasicModel.CashShopProduct
+        {
+            ProductSequence = 500 + packageSequence,
+            PriceSequence = 1,
+            Price = 400,
+            Quantity = 1,
+            ItemDefinition = new ItemDefinition { Group = 14, Number = 11, Width = 1, Height = 1 },
+        });
+        player.GameContext.Configuration.CashShopConfiguration!.Packages.Add(kundunPackage);
+
+        await this._actions.BuyAsync(player, packageSequence, 1, CashShopCoinType.GoblinPoints).ConfigureAwait(false);
+
+        GetView(player).Verify(v => v.ShowBuyResultAsync(CashShopBuyResult.NotForSale), Times.Once);
+        Assert.That(player.Account.GoblinPoints, Is.EqualTo(10000));
+        Assert.That(kundunPackage.IsForSale, Is.False, "Package should be disabled in memory");
+        var storage = await player.PersistenceContext.GetCashShopStorageItemsAsync(player.Account.GetId()).ConfigureAwait(false);
+        Assert.That(storage, Is.Empty);
+    }
+
+    /// <summary>
+    /// Tests that gifting a prohibited Box of Kundun package is rejected.
+    /// </summary>
+    [Test]
+    public async Task GiftProhibitedKundunBoxPackageIsRefusedAsync()
+    {
+        var player = await this.CreateOpenedCashShopPlayerAsync().ConfigureAwait(false);
+        player.Account!.GoblinPoints = 10000;
+        await CreateRecipientAsync(player).ConfigureAwait(false);
+
+        var kundunPackage = CreatePackage(461, CashShopCoinType.GoblinPoints, 0, isBundle: false);
+        kundunPackage.IsForSale = true;
+        kundunPackage.IsGiftable = true;
+        kundunPackage.Products.Add(new BasicModel.CashShopProduct
+        {
+            ProductSequence = 961,
+            PriceSequence = 1,
+            Price = 400,
+            Quantity = 1,
+            ItemDefinition = new ItemDefinition { Group = 14, Number = 11, Width = 1, Height = 1 },
+        });
+        player.GameContext.Configuration.CashShopConfiguration!.Packages.Add(kundunPackage);
+
+        await this._actions.GiftAsync(player, 461, 1, CashShopCoinType.GoblinPoints, RecipientName, "gift").ConfigureAwait(false);
+
+        GetView(player).Verify(v => v.ShowGiftResultAsync(CashShopGiftResult.NotForSale), Times.Once);
+        Assert.That(player.Account.GoblinPoints, Is.EqualTo(10000));
+        Assert.That(kundunPackage.IsForSale, Is.False);
+    }
+
+    /// <summary>
     /// Tests that nothing can be bought while the cash shop is closed.
     /// </summary>
     [Test]

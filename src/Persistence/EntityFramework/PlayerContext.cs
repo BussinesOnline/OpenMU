@@ -365,7 +365,7 @@ internal class PlayerContext : CachingEntityFrameworkContext, IPlayerContext
         {
             var account = await this.Context.Set<Account>()
                 .Where(candidate => candidate.Id == accountId)
-                .Select(candidate => new { candidate.LoginName, candidate.State })
+                .Select(candidate => new { candidate.LoginName, candidate.State, candidate.WCoinC, candidate.WCoinP, candidate.GoblinPoints })
                 .AsNoTracking()
                 .FirstOrDefaultAsync(cancellationToken)
                 .ConfigureAwait(false);
@@ -377,7 +377,7 @@ internal class PlayerContext : CachingEntityFrameworkContext, IPlayerContext
 
             if (account.State != DataModel.Entities.AccountState.Normal)
             {
-                return new AccountOverview(account.LoginName, account.State, Array.Empty<AccountCharacterOverview>());
+                return new AccountOverview(account.LoginName, account.State, Array.Empty<AccountCharacterOverview>(), account.WCoinC, account.WCoinP, account.GoblinPoints);
             }
 
             var characters = await this.Context.Set<Account>()
@@ -394,7 +394,7 @@ internal class PlayerContext : CachingEntityFrameworkContext, IPlayerContext
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
 
-            return new AccountOverview(account.LoginName, account.State, characters);
+            return new AccountOverview(account.LoginName, account.State, characters, account.WCoinC, account.WCoinP, account.GoblinPoints);
         }
     }
 

@@ -121,7 +121,54 @@ public sealed class PlayerPortalService(
             })
             .ToArray();
 
-        return new PlayerAccountSnapshot(account.LoginName, characters);
+        var grants = await context.GetLatestCashShopCoinGrantsAsync(ownerAccountId, 50, cancellationToken).ConfigureAwait(false);
+        var pendingWCoinC = 0;
+        var pendingWCoinP = 0;
+        var pendingGoblinPoints = 0;
+
+        foreach (var grant in grants)
+        {
+            if (grant.AppliedAt is not null)
+            {
+                continue;
+            }
+
+            switch (grant.CoinType)
+            {
+                case CashShopCoinType.WCoinC:
+                    pendingWCoinC += grant.Amount;
+                    break;
+                case CashShopCoinType.WCoinP:
+                    pendingWCoinP += grant.Amount;
+                    break;
+                case CashShopCoinType.GoblinPoints:
+                    pendingGoblinPoints += grant.Amount;
+                    break;
+            }
+        }
+
+        pendingWCoinC = Math.Max(0, pendingWCoinC);
+        pendingWCoinP = Math.Max(0, pendingWCoinP);
+        pendingGoblinPoints = Math.Max(0, pendingGoblinPoints);
+
+        var vaultBalances = new PlayerAccountVaultBalances(
+            account.WCoinC,
+            account.WCoinP,
+            account.GoblinPoints,
+            pendingWCoinC,
+            pendingWCoinP,
+            pendingGoblinPoints);
+
+        return new PlayerAccountSnapshot(
+            account.LoginName,
+            characters,
+            account.WCoinC,
+            account.WCoinP,
+            account.GoblinPoints,
+            pendingWCoinC,
+            pendingWCoinP,
+            pendingGoblinPoints,
+            vaultBalances);
     }
 
     private static int ReadStat(float value) => float.IsFinite(value) ? (int)Math.Clamp(value, 0, int.MaxValue) : 0;

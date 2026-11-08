@@ -10,7 +10,16 @@ using MUnique.OpenMU.DataModel.Entities;
 /// <param name="LoginName">The account's login name.</param>
 /// <param name="State">The current account state.</param>
 /// <param name="Characters">The account's character summaries.</param>
-public sealed record AccountOverview(string LoginName, AccountState State, IReadOnlyList<AccountCharacterOverview> Characters);
+/// <param name="WCoinC">The account's available WCoin (C).</param>
+/// <param name="WCoinP">The account's available WCoin (P).</param>
+/// <param name="GoblinPoints">The account's available Goblin Points.</param>
+public sealed record AccountOverview(
+    string LoginName,
+    AccountState State,
+    IReadOnlyList<AccountCharacterOverview> Characters,
+    int WCoinC = 0,
+    int WCoinP = 0,
+    int GoblinPoints = 0);
 
 /// <summary>A character projection containing only fields needed by the player portal.</summary>
 /// <param name="Name">The character name.</param>

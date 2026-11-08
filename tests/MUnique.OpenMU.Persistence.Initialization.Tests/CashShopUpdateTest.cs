@@ -124,7 +124,8 @@ internal class CashShopUpdateTest
         Assert.That(
             configuration.Packages.Where(p => p.IsForSale).SelectMany(p => p.Products),
             Has.All.Matches<CashShopProduct>(product => product.ItemDefinition is not null && product.Duration == TimeSpan.Zero));
-        Assert.That(configuration.Packages.Count(p => p.IsForSale), Is.EqualTo(21));
+        Assert.That(configuration.Packages.Count(p => p.IsForSale), Is.EqualTo(16));
+        Assert.That(configuration.Packages.Where(p => p.PackageSequence >= 461 && p.PackageSequence <= 465), Has.All.Matches<CashShopPackage>(p => !p.IsForSale));
         Assert.That(configuration.Packages.Where(p => DeliveryPackages.Contains(p.PackageSequence)), Has.All.Matches<CashShopPackage>(p => p.IsForSale));
 
         var seal = configuration.Packages.Single(p => p.PackageSequence == 122);
@@ -180,10 +181,38 @@ internal class CashShopUpdateTest
         await update.ApplyUpdateAsync(context, gameConfiguration).ConfigureAwait(false);
 
         Assert.That(gameConfiguration.Items.Count(IsDeliveryItem), Is.EqualTo(4));
-        Assert.That(configuration.Packages.Count(p => p.IsForSale), Is.EqualTo(21));
+        Assert.That(configuration.Packages.Count(p => p.IsForSale), Is.EqualTo(16));
+        Assert.That(configuration.Packages.Where(p => p.PackageSequence >= 461 && p.PackageSequence <= 465), Has.All.Matches<CashShopPackage>(p => !p.IsForSale));
         Assert.That(
             configuration.Packages.Where(p => DeliveryPackages.Contains(p.PackageSequence)).SelectMany(p => p.Products),
             Has.All.Matches<CashShopProduct>(product => product.ItemDefinition is { } item && IsDeliveryItem(item)));
+    }
+
+    /// <summary>
+    /// Tests that the update disables Box of Kundun packages (461-465) on an existing database
+    /// where they were previously enabled.
+    /// </summary>
+    [Test]
+    public async Task UpdateDisablesKundunBoxesOnExistingDatabaseAsync()
+    {
+        var (context, gameConfiguration) = await CreateSeason6ConfigurationAsync().ConfigureAwait(false);
+        using var _ = context;
+
+        // Simulate an existing database where 461-465 were initialized with isForSale = true
+        var kundunPackages = gameConfiguration.CashShopConfiguration!.Packages
+            .Where(p => p.PackageSequence >= 461 && p.PackageSequence <= 465)
+            .ToList();
+        foreach (var package in kundunPackages)
+        {
+            package.IsForSale = true;
+        }
+
+        Assert.That(kundunPackages, Has.All.Matches<CashShopPackage>(p => p.IsForSale));
+
+        var update = new DisableKundunBoxCashShopPackagesUpdatePlugIn();
+        await update.ApplyUpdateAsync(context, gameConfiguration).ConfigureAwait(false);
+
+        Assert.That(kundunPackages, Has.All.Matches<CashShopPackage>(p => !p.IsForSale));
     }
 
     private static bool IsDeliveryItem(DataModel.Configuration.Items.ItemDefinition item)

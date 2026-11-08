@@ -729,15 +729,15 @@ internal sealed class CashShopInitializer : InitializerBase
             .AddProduct(506, 585, 100000, 14, 146, 0, 1, 0);
         this.AddPackage(configuration, 390, LocalizedString.FromResource(() => CashShopPackageNames.RareItemTicket11), 60000, CashShopCoinType.GoblinPoints, isForSale: true, isGiftable: true, isBundle: false)
             .AddProduct(505, 584, 60000, 14, 149, 0, 1, 0);
-        this.AddPackage(configuration, 465, LocalizedString.FromResource(() => CashShopPackageNames.GPBoxofkundunPlus5), 3200, CashShopCoinType.GoblinPoints, isForSale: true, isGiftable: false, isBundle: false)
+        this.AddPackage(configuration, 465, LocalizedString.FromResource(() => CashShopPackageNames.GPBoxofkundunPlus5), 3200, CashShopCoinType.GoblinPoints, isForSale: false, isGiftable: false, isBundle: false)
             .AddProduct(563, 650, 3200, 14, 11, 12, 1, 0);
-        this.AddPackage(configuration, 464, LocalizedString.FromResource(() => CashShopPackageNames.GPBoxofkundunPlus4), 2400, CashShopCoinType.GoblinPoints, isForSale: true, isGiftable: false, isBundle: false)
+        this.AddPackage(configuration, 464, LocalizedString.FromResource(() => CashShopPackageNames.GPBoxofkundunPlus4), 2400, CashShopCoinType.GoblinPoints, isForSale: false, isGiftable: false, isBundle: false)
             .AddProduct(562, 649, 2400, 14, 11, 11, 1, 0);
-        this.AddPackage(configuration, 463, LocalizedString.FromResource(() => CashShopPackageNames.GPBoxofkundunPlus3), 1600, CashShopCoinType.GoblinPoints, isForSale: true, isGiftable: false, isBundle: false)
+        this.AddPackage(configuration, 463, LocalizedString.FromResource(() => CashShopPackageNames.GPBoxofkundunPlus3), 1600, CashShopCoinType.GoblinPoints, isForSale: false, isGiftable: false, isBundle: false)
             .AddProduct(561, 648, 1600, 14, 11, 10, 1, 0);
-        this.AddPackage(configuration, 462, LocalizedString.FromResource(() => CashShopPackageNames.GPBoxofkundunPlus2), 800, CashShopCoinType.GoblinPoints, isForSale: true, isGiftable: false, isBundle: false)
+        this.AddPackage(configuration, 462, LocalizedString.FromResource(() => CashShopPackageNames.GPBoxofkundunPlus2), 800, CashShopCoinType.GoblinPoints, isForSale: false, isGiftable: false, isBundle: false)
             .AddProduct(560, 647, 800, 14, 11, 9, 1, 0);
-        this.AddPackage(configuration, 461, LocalizedString.FromResource(() => CashShopPackageNames.GPBoxofKundunPlus1), 400, CashShopCoinType.GoblinPoints, isForSale: true, isGiftable: false, isBundle: false)
+        this.AddPackage(configuration, 461, LocalizedString.FromResource(() => CashShopPackageNames.GPBoxofKundunPlus1), 400, CashShopCoinType.GoblinPoints, isForSale: false, isGiftable: false, isBundle: false)
             .AddProduct(559, 646, 400, 14, 11, 8, 1, 0);
         this.AddPackage(configuration, 373, LocalizedString.FromResource(() => CashShopPackageNames.CherryBlossomPetal), 200, CashShopCoinType.GoblinPoints, isForSale: true, isGiftable: true, isBundle: false)
             .AddProduct(488, 567, 200, 14, 87, 0, 1, 0);
