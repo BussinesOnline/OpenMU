@@ -116,6 +116,39 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           echo 'native_amd64_startup=PASS'
 
+      - name: Package exact tested AMD64 image with provenance
+        run: |
+          set -euo pipefail
+          IMAGE="mu-oldverse/openmu:rc-9344df176-20261108"
+          # Workflow/docs changes must never silently change the tested runtime source.
+          git diff --quiet 9344df176af7965f1a66772948f4da5ad995a7af HEAD -- src
+          mkdir -p oldverse-rc-image
+          IMAGE_ID="$(docker image inspect "$IMAGE" --format '{{.Id}}')"
+          ARCH="$(docker image inspect "$IMAGE" --format '{{.Architecture}}')"
+          test "$ARCH" = amd64
+          docker save "$IMAGE" | gzip -1 > oldverse-rc-image/openmu-rc-amd64.docker.tar.gz
+          sha256sum oldverse-rc-image/openmu-rc-amd64.docker.tar.gz > oldverse-rc-image/SHA256SUMS
+          {
+            echo "source_commit=9344df176af7965f1a66772948f4da5ad995a7af"
+            echo "workflow_commit=$GITHUB_SHA"
+            echo "image_ref=$IMAGE"
+            echo "image_id=$IMAGE_ID"
+            echo "architecture=$ARCH"
+            echo "validated_in_same_run=true"
+          } > oldverse-rc-image/MANIFEST.txt
+          echo "archive_sha256=$(cut -d ' ' -f1 oldverse-rc-image/SHA256SUMS)" >> "$GITHUB_STEP_SUMMARY"
+          echo "tested_image_id=$IMAGE_ID" >> "$GITHUB_STEP_SUMMARY"
+          ls -lh oldverse-rc-image/
+
+      - name: Preserve exact tested image as short-lived GitHub artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mu-oldverse-openmu-rc-9344df1-linux-amd64
+          path: oldverse-rc-image/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+
       - name: Clean up disposable test stack
         if: always()
         run: |
