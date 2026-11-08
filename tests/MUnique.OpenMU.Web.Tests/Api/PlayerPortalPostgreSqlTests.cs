@@ -65,10 +65,10 @@ public sealed class PlayerPortalPostgreSqlTests
             await using (var admin = new NpgsqlConnection(requiredAdminConnection))
             {
                 await admin.OpenAsync().ConfigureAwait(false);
-                var grants = $"REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA data FROM {QuoteIdentifier(accountRole)}; ALTER DEFAULT PRIVILEGES IN SCHEMA data REVOKE ALL ON TABLES FROM {QuoteIdentifier(accountRole)}; REVOKE ALL ON SCHEMA data FROM {QuoteIdentifier(accountRole)}; GRANT USAGE ON SCHEMA data TO {QuoteIdentifier(accountRole)}; GRANT SELECT, INSERT ON TABLE data.\"Account\" TO {QuoteIdentifier(accountRole)}; GRANT SELECT ON TABLE data.\"Character\", data.\"StatAttribute\" TO {QuoteIdentifier(accountRole)}; REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA config FROM {QuoteIdentifier(configurationRole)}; REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA data FROM {QuoteIdentifier(configurationRole)}; ALTER DEFAULT PRIVILEGES IN SCHEMA config REVOKE ALL ON TABLES FROM {QuoteIdentifier(configurationRole)}; ALTER DEFAULT PRIVILEGES IN SCHEMA data REVOKE ALL ON TABLES FROM {QuoteIdentifier(configurationRole)}; REVOKE ALL ON SCHEMA config, data FROM {QuoteIdentifier(configurationRole)}; GRANT USAGE ON SCHEMA config, data TO {QuoteIdentifier(configurationRole)}; GRANT SELECT ON ALL TABLES IN SCHEMA config TO {QuoteIdentifier(configurationRole)}; GRANT SELECT ON TABLE data.\"Item\", data.\"ItemOptionLink\", data.\"ItemItemOfItemSet\", data.\"ItemStorage\" TO {QuoteIdentifier(configurationRole)};";
+                var grants = $"REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA data FROM {QuoteIdentifier(accountRole)}; ALTER DEFAULT PRIVILEGES IN SCHEMA data REVOKE ALL ON TABLES FROM {QuoteIdentifier(accountRole)}; REVOKE ALL ON SCHEMA data FROM {QuoteIdentifier(accountRole)}; GRANT USAGE ON SCHEMA data TO {QuoteIdentifier(accountRole)}; GRANT SELECT, INSERT ON TABLE data.\"Account\" TO {QuoteIdentifier(accountRole)}; GRANT SELECT ON TABLE data.\"Character\", data.\"StatAttribute\", data.\"CashShopCoinGrant\" TO {QuoteIdentifier(accountRole)}; REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA config FROM {QuoteIdentifier(configurationRole)}; REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA data FROM {QuoteIdentifier(configurationRole)}; ALTER DEFAULT PRIVILEGES IN SCHEMA config REVOKE ALL ON TABLES FROM {QuoteIdentifier(configurationRole)}; ALTER DEFAULT PRIVILEGES IN SCHEMA data REVOKE ALL ON TABLES FROM {QuoteIdentifier(configurationRole)}; REVOKE ALL ON SCHEMA config, data FROM {QuoteIdentifier(configurationRole)}; GRANT USAGE ON SCHEMA config, data TO {QuoteIdentifier(configurationRole)}; GRANT SELECT ON ALL TABLES IN SCHEMA config TO {QuoteIdentifier(configurationRole)}; GRANT SELECT ON TABLE data.\"Item\", data.\"ItemOptionLink\", data.\"ItemItemOfItemSet\", data.\"ItemStorage\" TO {QuoteIdentifier(configurationRole)};";
                 await using var command = new NpgsqlCommand(grants, admin);
                 await command.ExecuteNonQueryAsync().ConfigureAwait(false);
-                await using var check = new NpgsqlCommand("SELECT has_table_privilege(@accountRole, 'data.\"Account\"', 'SELECT'), has_table_privilege(@accountRole, 'data.\"Account\"', 'INSERT'), has_table_privilege(@accountRole, 'data.\"Account\"', 'UPDATE'), has_table_privilege(@accountRole, 'data.\"Account\"', 'DELETE'), has_table_privilege(@accountRole, 'data.\"AccountCharacterClass\"', 'SELECT'), has_table_privilege(@configurationRole, 'config.\"GameConfiguration\"', 'SELECT'), has_table_privilege(@configurationRole, 'config.\"GameConfiguration\"', 'UPDATE'), has_table_privilege(@configurationRole, 'data.\"Account\"', 'SELECT')", admin);
+                await using var check = new NpgsqlCommand("SELECT has_table_privilege(@accountRole, 'data.\"Account\"', 'SELECT'), has_table_privilege(@accountRole, 'data.\"Account\"', 'INSERT'), has_table_privilege(@accountRole, 'data.\"Account\"', 'UPDATE'), has_table_privilege(@accountRole, 'data.\"Account\"', 'DELETE'), has_table_privilege(@accountRole, 'data.\"AccountCharacterClass\"', 'SELECT'), has_table_privilege(@accountRole, 'data.\"CashShopCoinGrant\"', 'SELECT'), has_table_privilege(@configurationRole, 'config.\"GameConfiguration\"', 'SELECT'), has_table_privilege(@configurationRole, 'config.\"GameConfiguration\"', 'UPDATE'), has_table_privilege(@configurationRole, 'data.\"Account\"', 'SELECT')", admin);
                 check.Parameters.AddWithValue("accountRole", accountRole);
                 check.Parameters.AddWithValue("configurationRole", configurationRole);
                 await using var reader = await check.ExecuteReaderAsync().ConfigureAwait(false);
@@ -79,8 +79,9 @@ public sealed class PlayerPortalPostgreSqlTests
                 Assert.That(reader.GetBoolean(3), Is.False);
                 Assert.That(reader.GetBoolean(4), Is.False);
                 Assert.That(reader.GetBoolean(5), Is.True);
-                Assert.That(reader.GetBoolean(6), Is.False);
+                Assert.That(reader.GetBoolean(6), Is.True);
                 Assert.That(reader.GetBoolean(7), Is.False);
+                Assert.That(reader.GetBoolean(8), Is.False);
             }
 
             JsonConverterRegistry.RegisterConverter(new LocalizedStringJsonConverter());
@@ -110,12 +111,29 @@ public sealed class PlayerPortalPostgreSqlTests
             var firstMe = await RequestMeAsync(service, sessions, first.Session!.Token, "portaltwo").ConfigureAwait(false);
             var secondMe = await RequestMeAsync(service, sessions, second.Session!.Token, "portalone").ConfigureAwait(false);
             Assert.That(firstMe.LoginName, Is.EqualTo("portalone"));
+            Assert.That(firstMe.VaultBalances, Is.Not.Null);
+            Assert.That(firstMe.VaultBalances!.PendingWCoinC, Is.EqualTo(0));
             Assert.That(secondMe.LoginName, Is.EqualTo("portaltwo"));
+            Assert.That(secondMe.VaultBalances, Is.Not.Null);
+            Assert.That(secondMe.VaultBalances!.PendingWCoinC, Is.EqualTo(0));
 
             await using var verify = new NpgsqlConnection(requiredAdminConnection);
             await verify.OpenAsync().ConfigureAwait(false);
             await using var rows = new NpgsqlCommand("SELECT count(*) FROM data.\"Account\" WHERE \"LoginName\" IN ('portalone', 'portaltwo')", verify);
             Assert.That(await rows.ExecuteScalarAsync().ConfigureAwait(false), Is.EqualTo(2L));
+
+            Assert.That(sessions.TryGetAccountId(first.Session!.Token, out var firstAccountId), Is.True);
+            await using var insertGrant = new NpgsqlCommand("INSERT INTO data.\"CashShopCoinGrant\" (\"Id\", \"AccountId\", \"CoinType\", \"Amount\", \"Reference\", \"CreatedAt\", \"AppliedAt\") VALUES (@id, @accId, 0, 500, 'lab-ref-1', NOW(), NULL)", verify);
+            insertGrant.Parameters.AddWithValue("id", Guid.NewGuid());
+            insertGrant.Parameters.AddWithValue("accId", firstAccountId);
+            await insertGrant.ExecuteNonQueryAsync().ConfigureAwait(false);
+
+            var firstMeWithGrant = await RequestMeAsync(service, sessions, first.Session!.Token, "portalone").ConfigureAwait(false);
+            var secondMeWithGrant = await RequestMeAsync(service, sessions, second.Session!.Token, "portaltwo").ConfigureAwait(false);
+            Assert.That(firstMeWithGrant.PendingWCoinC, Is.EqualTo(500));
+            Assert.That(firstMeWithGrant.VaultBalances!.PendingWCoinC, Is.EqualTo(500));
+            Assert.That(secondMeWithGrant.PendingWCoinC, Is.EqualTo(0));
+            Assert.That(secondMeWithGrant.VaultBalances!.PendingWCoinC, Is.EqualTo(0));
         }
         finally
         {
