@@ -75,17 +75,28 @@ public sealed class PlayerPortalController(PlayerPortalService players, PlayerSe
         return this.Ok(account);
     }
 
-    /// <summary>Grants cash shop coins idempotently to an account.</summary>
+    /// <summary>Grants cash shop coins idempotently to an account. Requires privileged service authorization.</summary>
     /// <param name="request">The grant request.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     [HttpPost("cash-shop/grants")]
+    [Authorize(Policy = PlayerPortalApiDefaults.PrivilegedServiceAuthorizationPolicy)]
     [ProducesResponseType(typeof(CashShopCoinGrantInfo), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(CashShopCoinGrantInfo), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> GrantCoinsAsync([FromBody] PlayerPortalCoinGrantRequest request, CancellationToken cancellationToken)
     {
+        // Privileged service check: player sessions are strictly rejected from triggering coin grants.
+        // Concessions must only originate from verified trusted backend service execution, never from player context.
+        if (this.Request.Headers.ContainsKey(PlayerPortalApiDefaults.SessionHeaderName)
+            || !this.User.IsInRole(PlayerPortalApiDefaults.PrivilegedServiceRole))
+        {
+            return this.StatusCode(StatusCodes.Status403Forbidden, new { error = "privileged_service_authorization_required" });
+        }
+
         if (string.IsNullOrWhiteSpace(request.LoginName) || string.IsNullOrWhiteSpace(request.Reference))
         {
             return this.BadRequest(new { error = "invalid_grant_request" });

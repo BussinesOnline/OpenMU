@@ -13,6 +13,12 @@ public static class PlayerPortalApiDefaults
     /// <summary>The authorization policy required by all player portal API routes.</summary>
     public const string WorkerAuthorizationPolicy = "PlayerPortalWorkerOnly";
 
+    /// <summary>The authorization policy required for privileged service operations such as coin concessions.</summary>
+    public const string PrivilegedServiceAuthorizationPolicy = "PlayerPortalPrivilegedServiceOnly";
+
+    /// <summary>The role required for privileged coin grants.</summary>
+    public const string PrivilegedServiceRole = "service-grant";
+
     /// <summary>The header carrying the opaque player session from the trusted Worker.</summary>
     public const string SessionHeaderName = "X-Player-Session";
 

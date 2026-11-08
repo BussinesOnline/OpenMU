@@ -18,3 +18,4 @@ public sealed record PlayerPortalCoinGrantRequest(
     int Amount,
     string Reference,
     string? Reason);
+

@@ -4,6 +4,7 @@
 
 namespace MUnique.OpenMU.Web.Tests.Api;
 
+using System.Security.Claims;
 using System.Text.Encodings.Web;
 using System.Threading;
 using Microsoft.AspNetCore.Authentication;
@@ -463,10 +464,7 @@ public sealed class PlayerPortalApiTests
     public async Task GrantCoinsCreatesPendingGrantAndEnforcesIdempotencyAsync()
     {
         await this._service.RegisterAsync(Registration("charlie", "GamePass1")).ConfigureAwait(false);
-        var controller = new PlayerPortalController(this._service, this._sessions)
-        {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
-        };
+        var controller = this.CreatePrivilegedController();
 
         var request = new PlayerPortalCoinGrantRequest("charlie", CashShopCoinType.WCoinC, 500, "ord_ref_100", "Order ord_100");
         var firstResult = await controller.GrantCoinsAsync(request, CancellationToken.None).ConfigureAwait(false);
@@ -490,10 +488,7 @@ public sealed class PlayerPortalApiTests
     public async Task GrantCoinsRejectsInvalidAmountOrUnknownCoinTypeAsync()
     {
         await this._service.RegisterAsync(Registration("charlie2", "GamePass1")).ConfigureAwait(false);
-        var controller = new PlayerPortalController(this._service, this._sessions)
-        {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
-        };
+        var controller = this.CreatePrivilegedController();
 
         var zeroAmountReq = new PlayerPortalCoinGrantRequest("charlie2", CashShopCoinType.WCoinC, 0, "ref_zero", "Zero");
         var zeroRes = await controller.GrantCoinsAsync(zeroAmountReq, CancellationToken.None).ConfigureAwait(false);
@@ -512,10 +507,7 @@ public sealed class PlayerPortalApiTests
     [Test]
     public async Task GrantCoinsReturnsNotFoundForMissingAccountAsync()
     {
-        var controller = new PlayerPortalController(this._service, this._sessions)
-        {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
-        };
+        var controller = this.CreatePrivilegedController();
 
         var request = new PlayerPortalCoinGrantRequest("nonexistent_user", CashShopCoinType.WCoinC, 500, "ref_missing", "Test");
         var result = await controller.GrantCoinsAsync(request, CancellationToken.None).ConfigureAwait(false);
@@ -528,10 +520,7 @@ public sealed class PlayerPortalApiTests
     {
         await this._service.RegisterAsync(Registration("user_one", "GamePass1")).ConfigureAwait(false);
         await this._service.RegisterAsync(Registration("user_two", "GamePass1")).ConfigureAwait(false);
-        var controller = new PlayerPortalController(this._service, this._sessions)
-        {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
-        };
+        var controller = this.CreatePrivilegedController();
 
         var grantOne = new PlayerPortalCoinGrantRequest("user_one", CashShopCoinType.WCoinC, 500, "shared_ref_conflict", "One");
         var resOne = await controller.GrantCoinsAsync(grantOne, CancellationToken.None).ConfigureAwait(false);
@@ -540,6 +529,104 @@ public sealed class PlayerPortalApiTests
         var grantTwo = new PlayerPortalCoinGrantRequest("user_two", CashShopCoinType.WCoinC, 500, "shared_ref_conflict", "Two");
         var resTwo = await controller.GrantCoinsAsync(grantTwo, CancellationToken.None).ConfigureAwait(false);
         Assert.That(resTwo, Is.InstanceOf<ConflictObjectResult>());
+    }
+
+    /// <summary>P3 Req 2 and 3: The grant endpoint explicitly requires privileged service policy and rejects unprivileged callers.</summary>
+    [Test]
+    public void GrantCoinsEndpointRequiresPrivilegedServiceAuthorizationPolicy()
+    {
+        var method = typeof(PlayerPortalController).GetMethod(nameof(PlayerPortalController.GrantCoinsAsync))!;
+        var authAttr = method.GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true)
+            .Cast<AuthorizeAttribute>()
+            .FirstOrDefault();
+
+        Assert.That(authAttr, Is.Not.Null);
+        Assert.That(authAttr!.Policy, Is.EqualTo(PlayerPortalApiDefaults.PrivilegedServiceAuthorizationPolicy));
+    }
+
+    /// <summary>P3 Req 2 and 3: Rejects attempts to grant coins using player session credentials, headers, or without privileged role.</summary>
+    [Test]
+    public async Task GrantCoinsRejectsPlayerSessionCommonCredentialAndInsufficientRoleAsync()
+    {
+        await this._service.RegisterAsync(Registration("alice_grantee", "GamePass1")).ConfigureAwait(false);
+        var grantRequest = new PlayerPortalCoinGrantRequest("alice_grantee", CashShopCoinType.WCoinC, 500, "ref_unauth_attempt", "Test");
+
+        // 1. Caller without privileged service role (e.g. regular player identity) -> 403 Forbidden
+        var playerClaims = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.Name, "alice_player"), new Claim(ClaimTypes.Role, "player")],
+            "PlayerAuth"));
+        var playerController = new PlayerPortalController(this._service, this._sessions)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = playerClaims } },
+        };
+        var playerResult = await playerController.GrantCoinsAsync(grantRequest, CancellationToken.None).ConfigureAwait(false);
+        Assert.That(playerResult, Is.InstanceOf<ObjectResult>());
+        Assert.That(((ObjectResult)playerResult).StatusCode, Is.EqualTo(StatusCodes.Status403Forbidden));
+
+        // 2. Caller with valid privileged service identity BUT presenting X-Player-Session header (player session contamination) -> 403 Forbidden
+        var sessionContaminatedController = this.CreatePrivilegedController();
+        sessionContaminatedController.Request.Headers[PlayerPortalApiDefaults.SessionHeaderName] = "player-session-token-attempt";
+        var contaminatedResult = await sessionContaminatedController.GrantCoinsAsync(grantRequest, CancellationToken.None).ConfigureAwait(false);
+        Assert.That(contaminatedResult, Is.InstanceOf<ObjectResult>());
+        Assert.That(((ObjectResult)contaminatedResult).StatusCode, Is.EqualTo(StatusCodes.Status403Forbidden));
+
+        // 3. Caller completely unauthenticated -> 403 Forbidden
+        var unauthenticatedController = new PlayerPortalController(this._service, this._sessions)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
+        };
+        var unauthResult = await unauthenticatedController.GrantCoinsAsync(grantRequest, CancellationToken.None).ConfigureAwait(false);
+        Assert.That(unauthResult, Is.InstanceOf<ObjectResult>());
+        Assert.That(((ObjectResult)unauthResult).StatusCode, Is.EqualTo(StatusCodes.Status403Forbidden));
+    }
+
+    /// <summary>P3 Req 2 and 3: Worker authentication handler enforces the distinct secret and assigns the privileged service role.</summary>
+    [Test]
+    public async Task WorkerAuthenticationAssignsPrivilegedRoleAndRejectsPlayerBearerTokensAsync()
+    {
+        const string workerSecret = "synthetic-worker-secret-with-32-bytes-minimum";
+        var loggerProvider = new CapturingLoggerProvider();
+        using var loggerFactory = LoggerFactory.Create(builder => builder.AddProvider(loggerProvider).SetMinimumLevel(LogLevel.Trace));
+        var options = new FixedOptionsMonitor<AuthenticationSchemeOptions>(new AuthenticationSchemeOptions());
+
+        // Authenticated player session token used as Bearer token -> FAILS authentication
+        var playerSessionTokenAsBearer = "token_sess_1234567890abcdef1234567890abcdef";
+        var playerBearerResult = await AuthenticateWorkerAsync(workerSecret, $"Bearer {playerSessionTokenAsBearer}", options, loggerFactory).ConfigureAwait(false);
+        Assert.That(playerBearerResult.Succeeded, Is.False);
+
+        // Invalid secret -> FAILS authentication
+        var invalidSecretResult = await AuthenticateWorkerAsync(workerSecret, "Bearer wrong-secret-32-bytes-minimum-wrong", options, loggerFactory).ConfigureAwait(false);
+        Assert.That(invalidSecretResult.Succeeded, Is.False);
+
+        // Missing Authorization header -> FAILS authentication
+        var missingAuthResult = await AuthenticateWorkerAsync(workerSecret, null, options, loggerFactory).ConfigureAwait(false);
+        Assert.That(missingAuthResult.Succeeded, Is.False);
+
+        // Valid Worker secret -> SUCCEEDS and includes PrivilegedServiceRole
+        var successResult = await AuthenticateWorkerAsync(workerSecret, $"Bearer {workerSecret}", options, loggerFactory).ConfigureAwait(false);
+        Assert.That(successResult.Succeeded, Is.True);
+        Assert.That(successResult.Principal!.IsInRole(PlayerPortalApiDefaults.PrivilegedServiceRole), Is.True);
+        Assert.That(successResult.Principal.Identity!.Name, Is.EqualTo("cloudflare-worker"));
+    }
+
+    private PlayerPortalController CreatePrivilegedController()
+    {
+        var identity = new ClaimsIdentity(
+            [
+                new Claim(ClaimTypes.Name, "cloudflare-worker"),
+                new Claim(ClaimTypes.Role, PlayerPortalApiDefaults.PrivilegedServiceRole),
+            ],
+            PlayerPortalApiDefaults.WorkerAuthenticationScheme);
+
+        var httpContext = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(identity),
+        };
+
+        return new PlayerPortalController(this._service, this._sessions)
+        {
+            ControllerContext = new ControllerContext { HttpContext = httpContext },
+        };
     }
 
     private static AccountRegistration Registration(string loginName, string password) => new() { LoginName = loginName, Password = password };

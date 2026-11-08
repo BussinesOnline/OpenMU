@@ -52,7 +52,12 @@ public sealed class PlayerPortalWorkerAuthenticationHandler : AuthenticationHand
             return Task.FromResult(AuthenticateResult.Fail("Invalid service credentials."));
         }
 
-        var identity = new ClaimsIdentity([new Claim(ClaimTypes.Name, "cloudflare-worker")], this.Scheme.Name);
+        var identity = new ClaimsIdentity(
+            [
+                new Claim(ClaimTypes.Name, "cloudflare-worker"),
+                new Claim(ClaimTypes.Role, PlayerPortalApiDefaults.PrivilegedServiceRole),
+            ],
+            this.Scheme.Name);
         return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), this.Scheme.Name)));
     }
 

@@ -38,13 +38,25 @@ public static class PlayerPortalApiExtensions
                 options.DefaultChallengeScheme = PlayerPortalApiDefaults.WorkerAuthenticationScheme;
             })
             .AddScheme<AuthenticationSchemeOptions, PlayerPortalWorkerAuthenticationHandler>(PlayerPortalApiDefaults.WorkerAuthenticationScheme, _ => { });
-        services.AddAuthorization(options => options.AddPolicy(
-            PlayerPortalApiDefaults.WorkerAuthorizationPolicy,
-            policy =>
-            {
-                policy.AddAuthenticationSchemes(PlayerPortalApiDefaults.WorkerAuthenticationScheme);
-                policy.RequireAuthenticatedUser();
-            }));
+        services.AddAuthorization(options =>
+        {
+            options.AddPolicy(
+                PlayerPortalApiDefaults.WorkerAuthorizationPolicy,
+                policy =>
+                {
+                    policy.AddAuthenticationSchemes(PlayerPortalApiDefaults.WorkerAuthenticationScheme);
+                    policy.RequireAuthenticatedUser();
+                });
+
+            options.AddPolicy(
+                PlayerPortalApiDefaults.PrivilegedServiceAuthorizationPolicy,
+                policy =>
+                {
+                    policy.AddAuthenticationSchemes(PlayerPortalApiDefaults.WorkerAuthenticationScheme);
+                    policy.RequireAuthenticatedUser();
+                    policy.RequireRole(PlayerPortalApiDefaults.PrivilegedServiceRole);
+                });
+        });
 
         return services;
     }
