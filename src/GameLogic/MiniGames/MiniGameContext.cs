@@ -231,6 +231,7 @@ public class MiniGameContext : AsyncDisposable, IEventStateProvider
 
         player.CurrentMiniGame = this;
         player.PlayerPickedUpItem += this.OnPlayerPickedUpItemAsync;
+        await this.UpdateMiniGameStateAsync(player).ConfigureAwait(false);
 
         return EnterResult.Success;
     }
@@ -343,6 +344,7 @@ public class MiniGameContext : AsyncDisposable, IEventStateProvider
         }
 
         this.Logger.LogInformation("{context}: Player {player} rejoined the game after losing its connection.", this, player);
+        await this.UpdateMiniGameStateAsync(player).ConfigureAwait(false);
         return true;
     }
 
@@ -740,7 +742,6 @@ public class MiniGameContext : AsyncDisposable, IEventStateProvider
                 return;
             }
 
-            await this.ShowCountdownMessageAsync().ConfigureAwait(false);
             this.Logger.LogDebug("{context}: Waiting for the countdown duration of {countdownDuration}", this, this.CountdownDuration);
             await this.DelayWithSkipAsync(this.CountdownDuration, cancellationToken).ConfigureAwait(false);
 
@@ -762,8 +763,6 @@ public class MiniGameContext : AsyncDisposable, IEventStateProvider
 
             this.Logger.LogDebug("{context}: Waiting for the exit duration of {exitDuration}", this, exitDuration);
             await Task.Delay(exitDuration, default(CancellationToken)).ConfigureAwait(false);
-            await this.ShowCountdownMessageAsync().ConfigureAwait(false);
-
             this.Logger.LogDebug("{context}: Waiting for the exit countdown duration of {countdownDuration}", this, CountdownMessageDuration);
             await Task.Delay(CountdownMessageDuration, default(CancellationToken)).ConfigureAwait(false);
 
@@ -787,11 +786,13 @@ public class MiniGameContext : AsyncDisposable, IEventStateProvider
     private async ValueTask CloseEntranceAsync()
     {
         await this._players.SetStateAsync(MiniGameState.Closed).ConfigureAwait(false);
+        await this.UpdateMiniGameStateForPlayersAsync().ConfigureAwait(false);
     }
 
     private async ValueTask StartAsync()
     {
         await this._players.SetStateAsync(MiniGameState.Playing).ConfigureAwait(false);
+        await this.UpdateMiniGameStateForPlayersAsync().ConfigureAwait(false);
         var players = await this._players.GetSnapshotAsync().ConfigureAwait(false);
 
         await this.OnGameStartAsync(players).ConfigureAwait(false);
@@ -800,14 +801,10 @@ public class MiniGameContext : AsyncDisposable, IEventStateProvider
         await this.NotifyPlugInsAsync<IMiniGameStartedPlugIn>(p => p.MiniGameStartedAsync(this, players)).ConfigureAwait(false);
     }
 
-    private async ValueTask ShowCountdownMessageAsync()
-    {
-        await this.ForEachPlayerAsync(player => player.InvokeViewPlugInAsync<IUpdateMiniGameStateViewPlugIn>(p => p.UpdateStateAsync(this.Definition.Type, this.State)).AsTask()).ConfigureAwait(false);
-    }
-
     private async ValueTask StopAsync()
     {
         await this._players.SetStateAsync(MiniGameState.Ended).ConfigureAwait(false);
+        await this.UpdateMiniGameStateForPlayersAsync().ConfigureAwait(false);
         try
         {
             await this._gameEndedCts.CancelAsync().ConfigureAwait(false);
@@ -829,6 +826,16 @@ public class MiniGameContext : AsyncDisposable, IEventStateProvider
 
         // Notified after GameEndedAsync, because some games determine their winner there.
         await this.NotifyPlugInsAsync<IMiniGameEndedPlugIn>(p => p.MiniGameEndedAsync(this, this.Winner, players)).ConfigureAwait(false);
+    }
+
+    private ValueTask UpdateMiniGameStateForPlayersAsync()
+    {
+        return this.ForEachPlayerAsync(player => this.UpdateMiniGameStateAsync(player).AsTask());
+    }
+
+    private ValueTask UpdateMiniGameStateAsync(Player player)
+    {
+        return player.InvokeViewPlugInAsync<IUpdateMiniGameStateViewPlugIn>(p => p.UpdateStateAsync(this.Definition.Type, this.State));
     }
 
     private ValueTask NotifyPlugInsAsync<TPlugIn>(Func<TPlugIn, ValueTask> notify)
