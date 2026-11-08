@@ -26,7 +26,19 @@ public static class PlayerPortalApiExtensions
             throw new InvalidOperationException($"{PlayerPortalApiDefaults.WorkerTokenConfigurationKey} must contain at least 32 UTF-8 bytes.");
         }
 
+        var grantToken = configuration[PlayerPortalApiDefaults.GrantTokenConfigurationKey];
+        if (grantToken is null || Encoding.UTF8.GetByteCount(grantToken) < 32)
+        {
+            throw new InvalidOperationException($"{PlayerPortalApiDefaults.GrantTokenConfigurationKey} must contain at least 32 UTF-8 bytes.");
+        }
+
+        if (string.Equals(workerToken, grantToken, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"{PlayerPortalApiDefaults.GrantTokenConfigurationKey} must be distinct from {PlayerPortalApiDefaults.WorkerTokenConfigurationKey}.");
+        }
+
         services.AddSingleton(new PlayerPortalWorkerCredential(workerToken));
+        services.AddSingleton(new PlayerPortalGrantCredential(grantToken));
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<PlayerSessionStore>();
         services.AddSingleton<PlayerLoginAttemptLimiter>();

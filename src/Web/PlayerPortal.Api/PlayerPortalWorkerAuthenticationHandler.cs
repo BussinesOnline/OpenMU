@@ -15,24 +15,28 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
 
-/// <summary>Authenticates only the trusted Cloudflare Worker service identity.</summary>
+/// <summary>Authenticates the trusted Cloudflare Worker identities, distinguishing between common portal worker and privileged grant service.</summary>
 public sealed class PlayerPortalWorkerAuthenticationHandler : AuthenticationHandler<AuthenticationSchemeOptions>
 {
-    private readonly byte[] _expectedToken;
+    private readonly byte[] _expectedWorkerToken;
+    private readonly byte[] _expectedGrantToken;
 
     /// <summary>Initializes a new instance of the <see cref="PlayerPortalWorkerAuthenticationHandler"/> class.</summary>
     /// <param name="options">The authentication scheme options monitor.</param>
     /// <param name="logger">The logger factory.</param>
     /// <param name="encoder">The URL encoder.</param>
-    /// <param name="credential">The configured Worker service credential.</param>
+    /// <param name="workerCredential">The configured common Worker service credential.</param>
+    /// <param name="grantCredential">The configured privileged grant service credential.</param>
     public PlayerPortalWorkerAuthenticationHandler(
         IOptionsMonitor<AuthenticationSchemeOptions> options,
         ILoggerFactory logger,
         UrlEncoder encoder,
-        PlayerPortalWorkerCredential credential)
+        PlayerPortalWorkerCredential workerCredential,
+        PlayerPortalGrantCredential grantCredential)
         : base(options, logger, encoder)
     {
-        this._expectedToken = Encoding.UTF8.GetBytes(credential.Value);
+        this._expectedWorkerToken = Encoding.UTF8.GetBytes(workerCredential.Value);
+        this._expectedGrantToken = Encoding.UTF8.GetBytes(grantCredential.Value);
     }
 
     /// <inheritdoc />
@@ -47,18 +51,33 @@ public sealed class PlayerPortalWorkerAuthenticationHandler : AuthenticationHand
         }
 
         var candidate = Encoding.UTF8.GetBytes(parsed.Parameter);
-        if (candidate.Length != this._expectedToken.Length || !CryptographicOperations.FixedTimeEquals(candidate, this._expectedToken))
+
+        // 1. Check if candidate matches the dedicated privileged grant credential
+        if (candidate.Length == this._expectedGrantToken.Length && CryptographicOperations.FixedTimeEquals(candidate, this._expectedGrantToken))
         {
-            return Task.FromResult(AuthenticateResult.Fail("Invalid service credentials."));
+            var grantIdentity = new ClaimsIdentity(
+                [
+                    new Claim(ClaimTypes.Name, "cloudflare-worker-grant-service"),
+                    new Claim(ClaimTypes.Role, PlayerPortalApiDefaults.PrivilegedServiceRole),
+                    new Claim(ClaimTypes.Role, PlayerPortalApiDefaults.CommonWorkerRole),
+                ],
+                this.Scheme.Name);
+            return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(grantIdentity), this.Scheme.Name)));
         }
 
-        var identity = new ClaimsIdentity(
-            [
-                new Claim(ClaimTypes.Name, "cloudflare-worker"),
-                new Claim(ClaimTypes.Role, PlayerPortalApiDefaults.PrivilegedServiceRole),
-            ],
-            this.Scheme.Name);
-        return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), this.Scheme.Name)));
+        // 2. Check if candidate matches the common portal worker credential (sessions, me, login)
+        if (candidate.Length == this._expectedWorkerToken.Length && CryptographicOperations.FixedTimeEquals(candidate, this._expectedWorkerToken))
+        {
+            var workerIdentity = new ClaimsIdentity(
+                [
+                    new Claim(ClaimTypes.Name, "cloudflare-worker"),
+                    new Claim(ClaimTypes.Role, PlayerPortalApiDefaults.CommonWorkerRole),
+                ],
+                this.Scheme.Name);
+            return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(workerIdentity), this.Scheme.Name)));
+        }
+
+        return Task.FromResult(AuthenticateResult.Fail("Invalid service credentials."));
     }
 
     /// <inheritdoc />

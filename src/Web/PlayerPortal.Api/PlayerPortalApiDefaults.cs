@@ -16,12 +16,18 @@ public static class PlayerPortalApiDefaults
     /// <summary>The authorization policy required for privileged service operations such as coin concessions.</summary>
     public const string PrivilegedServiceAuthorizationPolicy = "PlayerPortalPrivilegedServiceOnly";
 
+    /// <summary>The role assigned to the common player portal worker identity (used for sessions, login, me).</summary>
+    public const string CommonWorkerRole = "common-worker";
+
     /// <summary>The role required for privileged coin grants.</summary>
     public const string PrivilegedServiceRole = "service-grant";
 
     /// <summary>The header carrying the opaque player session from the trusted Worker.</summary>
     public const string SessionHeaderName = "X-Player-Session";
 
-    /// <summary>The configuration key holding the distinct Worker service credential.</summary>
+    /// <summary>The configuration key holding the common Worker service credential.</summary>
     public const string WorkerTokenConfigurationKey = "PlayerPortalApi:WorkerToken";
+
+    /// <summary>The configuration key holding the distinct privileged coin grant service credential.</summary>
+    public const string GrantTokenConfigurationKey = "PlayerPortalApi:GrantToken";
 }

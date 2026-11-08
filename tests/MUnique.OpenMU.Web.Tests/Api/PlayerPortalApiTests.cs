@@ -244,9 +244,44 @@ public sealed class PlayerPortalApiTests
         services.AddPlayerPortalApi(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             [PlayerPortalApiDefaults.WorkerTokenConfigurationKey] = "synthetic-worker-secret-with-32-bytes-minimum",
+            [PlayerPortalApiDefaults.GrantTokenConfigurationKey] = "synthetic-grant-secret-with-32-bytes-minimum",
         }).Build());
 
         Assert.That(services.Any(descriptor => descriptor.ServiceType == typeof(AccountRegistrationService)), Is.True);
+    }
+
+    /// <summary>P3 Adjustment 1: Startup fails closed if either worker or grant token is absent, short, or identical.</summary>
+    [Test]
+    public void PlayerPortalApiStartupEnforcesDistinctWorkerAndGrantTokens()
+    {
+        const string validWorker = "synthetic-worker-secret-with-32-bytes-minimum";
+        const string validGrant = "synthetic-grant-secret-with-32-bytes-minimum";
+
+        // Missing both -> throws
+        Assert.That(() => new ServiceCollection().AddPlayerPortalApi(new ConfigurationBuilder().Build()), Throws.InvalidOperationException);
+
+        // Missing grant token -> throws
+        var missingGrant = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            [PlayerPortalApiDefaults.WorkerTokenConfigurationKey] = validWorker,
+        }).Build();
+        Assert.That(() => new ServiceCollection().AddPlayerPortalApi(missingGrant), Throws.InvalidOperationException);
+
+        // Identical worker and grant tokens -> throws
+        var identicalTokens = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            [PlayerPortalApiDefaults.WorkerTokenConfigurationKey] = validWorker,
+            [PlayerPortalApiDefaults.GrantTokenConfigurationKey] = validWorker,
+        }).Build();
+        Assert.That(() => new ServiceCollection().AddPlayerPortalApi(identicalTokens), Throws.InvalidOperationException);
+
+        // Distinct tokens -> succeeds
+        var validConfig = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            [PlayerPortalApiDefaults.WorkerTokenConfigurationKey] = validWorker,
+            [PlayerPortalApiDefaults.GrantTokenConfigurationKey] = validGrant,
+        }).Build();
+        Assert.That(() => new ServiceCollection().AddPlayerPortalApi(validConfig), Throws.Nothing);
     }
 
     /// <summary>Worker authentication rejects missing, weakly-configured, and incorrect service credentials.</summary>
@@ -254,18 +289,22 @@ public sealed class PlayerPortalApiTests
     public async Task WorkerAuthenticationRequiresDistinctBearerCredentialAsync()
     {
         const string workerSecret = "synthetic-worker-secret-with-32-bytes-minimum";
+        const string grantSecret = "synthetic-grant-secret-with-32-bytes-minimum";
         var loggerProvider = new CapturingLoggerProvider();
         using var loggerFactory = LoggerFactory.Create(builder => builder.AddProvider(loggerProvider).SetMinimumLevel(LogLevel.Trace));
         var options = new FixedOptionsMonitor<AuthenticationSchemeOptions>(new AuthenticationSchemeOptions());
 
-        var unauthenticated = await AuthenticateWorkerAsync(workerSecret, null, options, loggerFactory).ConfigureAwait(false);
-        var rejected = await AuthenticateWorkerAsync(workerSecret, "Bearer wrong-secret-value", options, loggerFactory).ConfigureAwait(false);
-        var accepted = await AuthenticateWorkerAsync(workerSecret, $"Bearer {workerSecret}", options, loggerFactory).ConfigureAwait(false);
+        var unauthenticated = await AuthenticateWorkerAsync(workerSecret, grantSecret, null, options, loggerFactory).ConfigureAwait(false);
+        var rejected = await AuthenticateWorkerAsync(workerSecret, grantSecret, "Bearer wrong-secret-value", options, loggerFactory).ConfigureAwait(false);
+        var acceptedWorker = await AuthenticateWorkerAsync(workerSecret, grantSecret, $"Bearer {workerSecret}", options, loggerFactory).ConfigureAwait(false);
+        var acceptedGrant = await AuthenticateWorkerAsync(workerSecret, grantSecret, $"Bearer {grantSecret}", options, loggerFactory).ConfigureAwait(false);
 
         Assert.That(unauthenticated.Succeeded, Is.False);
         Assert.That(rejected.Succeeded, Is.False);
-        Assert.That(accepted.Succeeded, Is.True);
+        Assert.That(acceptedWorker.Succeeded, Is.True);
+        Assert.That(acceptedGrant.Succeeded, Is.True);
         Assert.That(loggerProvider.Messages.Any(message => message.Contains(workerSecret, StringComparison.Ordinal)), Is.False);
+        Assert.That(loggerProvider.Messages.Any(message => message.Contains(grantSecret, StringComparison.Ordinal)), Is.False);
     }
 
     /// <summary>The /me endpoint returns real available balances and isolates pending grants awaiting GameServer application.</summary>
@@ -580,41 +619,104 @@ public sealed class PlayerPortalApiTests
         Assert.That(((ObjectResult)unauthResult).StatusCode, Is.EqualTo(StatusCodes.Status403Forbidden));
     }
 
-    /// <summary>P3 Req 2 and 3: Worker authentication handler enforces the distinct secret and assigns the privileged service role.</summary>
+    /// <summary>P3 Adjustment 1 (Negative): Common Worker token used by login and /me CANNOT grant coins.</summary>
+    [Test]
+    public async Task CommonWorkerTokenCannotGrantCoinsAsync()
+    {
+        await this._service.RegisterAsync(Registration("bob_gr", "GamePass1")).ConfigureAwait(false);
+        var grantRequest = new PlayerPortalCoinGrantRequest("bob_gr", CashShopCoinType.WCoinC, 500, "ref_common_worker_attempt", "Test");
+
+        // Identity created from Common Worker credential has CommonWorkerRole but lacks PrivilegedServiceRole
+        var commonWorkerController = this.CreateCommonWorkerController();
+        var result = await commonWorkerController.GrantCoinsAsync(grantRequest, CancellationToken.None).ConfigureAwait(false);
+
+        Assert.That(result, Is.InstanceOf<ObjectResult>());
+        Assert.That(((ObjectResult)result).StatusCode, Is.EqualTo(StatusCodes.Status403Forbidden));
+    }
+
+    /// <summary>P3 Adjustment 1 (Positive): Privileged grant service credential CAN grant coins.</summary>
+    [Test]
+    public async Task PrivilegedGrantTokenCanGrantCoinsAsync()
+    {
+        await this._service.RegisterAsync(Registration("alice_gr2", "GamePass1")).ConfigureAwait(false);
+        var grantRequest = new PlayerPortalCoinGrantRequest("alice_gr2", CashShopCoinType.WCoinC, 1000, "ref_privileged_success", "Order ok");
+
+        // Identity created from Privileged Grant credential has PrivilegedServiceRole
+        var privilegedController = this.CreatePrivilegedController();
+        var result = await privilegedController.GrantCoinsAsync(grantRequest, CancellationToken.None).ConfigureAwait(false);
+
+        Assert.That(result, Is.InstanceOf<ObjectResult>());
+        Assert.That(((ObjectResult)result).StatusCode, Is.EqualTo(StatusCodes.Status201Created));
+        var grantInfo = (CashShopCoinGrantInfo)((ObjectResult)result).Value!;
+        Assert.That(grantInfo.Amount, Is.EqualTo(1000));
+        Assert.That(grantInfo.Reference, Is.EqualTo("ref_privileged_success"));
+    }
+
+    /// <summary>P3 Req 2 and 3: Worker authentication handler enforces distinct secrets and assigns roles accordingly.</summary>
     [Test]
     public async Task WorkerAuthenticationAssignsPrivilegedRoleAndRejectsPlayerBearerTokensAsync()
     {
         const string workerSecret = "synthetic-worker-secret-with-32-bytes-minimum";
+        const string grantSecret = "synthetic-grant-secret-with-32-bytes-minimum";
         var loggerProvider = new CapturingLoggerProvider();
         using var loggerFactory = LoggerFactory.Create(builder => builder.AddProvider(loggerProvider).SetMinimumLevel(LogLevel.Trace));
         var options = new FixedOptionsMonitor<AuthenticationSchemeOptions>(new AuthenticationSchemeOptions());
 
-        // Authenticated player session token used as Bearer token -> FAILS authentication
+        // 1. Authenticated player session token used as Bearer token -> FAILS authentication
         var playerSessionTokenAsBearer = "token_sess_1234567890abcdef1234567890abcdef";
-        var playerBearerResult = await AuthenticateWorkerAsync(workerSecret, $"Bearer {playerSessionTokenAsBearer}", options, loggerFactory).ConfigureAwait(false);
+        var playerBearerResult = await AuthenticateWorkerAsync(workerSecret, grantSecret, $"Bearer {playerSessionTokenAsBearer}", options, loggerFactory).ConfigureAwait(false);
         Assert.That(playerBearerResult.Succeeded, Is.False);
 
-        // Invalid secret -> FAILS authentication
-        var invalidSecretResult = await AuthenticateWorkerAsync(workerSecret, "Bearer wrong-secret-32-bytes-minimum-wrong", options, loggerFactory).ConfigureAwait(false);
+        // 2. Invalid secret -> FAILS authentication
+        var invalidSecretResult = await AuthenticateWorkerAsync(workerSecret, grantSecret, "Bearer wrong-secret-32-bytes-minimum-wrong", options, loggerFactory).ConfigureAwait(false);
         Assert.That(invalidSecretResult.Succeeded, Is.False);
 
-        // Missing Authorization header -> FAILS authentication
-        var missingAuthResult = await AuthenticateWorkerAsync(workerSecret, null, options, loggerFactory).ConfigureAwait(false);
+        // 3. Missing Authorization header -> FAILS authentication
+        var missingAuthResult = await AuthenticateWorkerAsync(workerSecret, grantSecret, null, options, loggerFactory).ConfigureAwait(false);
         Assert.That(missingAuthResult.Succeeded, Is.False);
 
-        // Valid Worker secret -> SUCCEEDS and includes PrivilegedServiceRole
-        var successResult = await AuthenticateWorkerAsync(workerSecret, $"Bearer {workerSecret}", options, loggerFactory).ConfigureAwait(false);
-        Assert.That(successResult.Succeeded, Is.True);
-        Assert.That(successResult.Principal!.IsInRole(PlayerPortalApiDefaults.PrivilegedServiceRole), Is.True);
-        Assert.That(successResult.Principal.Identity!.Name, Is.EqualTo("cloudflare-worker"));
+        // 4. Common Worker secret -> SUCCEEDS with CommonWorkerRole, but DOES NOT have PrivilegedServiceRole
+        var commonWorkerResult = await AuthenticateWorkerAsync(workerSecret, grantSecret, $"Bearer {workerSecret}", options, loggerFactory).ConfigureAwait(false);
+        Assert.That(commonWorkerResult.Succeeded, Is.True);
+        Assert.That(commonWorkerResult.Principal!.IsInRole(PlayerPortalApiDefaults.CommonWorkerRole), Is.True);
+        Assert.That(commonWorkerResult.Principal.IsInRole(PlayerPortalApiDefaults.PrivilegedServiceRole), Is.False);
+        Assert.That(commonWorkerResult.Principal.Identity!.Name, Is.EqualTo("cloudflare-worker"));
+
+        // 5. Privileged Grant secret -> SUCCEEDS with PrivilegedServiceRole
+        var grantResult = await AuthenticateWorkerAsync(workerSecret, grantSecret, $"Bearer {grantSecret}", options, loggerFactory).ConfigureAwait(false);
+        Assert.That(grantResult.Succeeded, Is.True);
+        Assert.That(grantResult.Principal!.IsInRole(PlayerPortalApiDefaults.PrivilegedServiceRole), Is.True);
+        Assert.That(grantResult.Principal.IsInRole(PlayerPortalApiDefaults.CommonWorkerRole), Is.True);
+        Assert.That(grantResult.Principal.Identity!.Name, Is.EqualTo("cloudflare-worker-grant-service"));
     }
 
     private PlayerPortalController CreatePrivilegedController()
     {
         var identity = new ClaimsIdentity(
             [
-                new Claim(ClaimTypes.Name, "cloudflare-worker"),
+                new Claim(ClaimTypes.Name, "cloudflare-worker-grant-service"),
                 new Claim(ClaimTypes.Role, PlayerPortalApiDefaults.PrivilegedServiceRole),
+                new Claim(ClaimTypes.Role, PlayerPortalApiDefaults.CommonWorkerRole),
+            ],
+            PlayerPortalApiDefaults.WorkerAuthenticationScheme);
+
+        var httpContext = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(identity),
+        };
+
+        return new PlayerPortalController(this._service, this._sessions)
+        {
+            ControllerContext = new ControllerContext { HttpContext = httpContext },
+        };
+    }
+
+    private PlayerPortalController CreateCommonWorkerController()
+    {
+        var identity = new ClaimsIdentity(
+            [
+                new Claim(ClaimTypes.Name, "cloudflare-worker"),
+                new Claim(ClaimTypes.Role, PlayerPortalApiDefaults.CommonWorkerRole),
             ],
             PlayerPortalApiDefaults.WorkerAuthenticationScheme);
 
@@ -631,7 +733,12 @@ public sealed class PlayerPortalApiTests
 
     private static AccountRegistration Registration(string loginName, string password) => new() { LoginName = loginName, Password = password };
 
-    private static async Task<AuthenticateResult> AuthenticateWorkerAsync(string configuredSecret, string? presentedCredential, IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory loggerFactory)
+    private static async Task<AuthenticateResult> AuthenticateWorkerAsync(
+        string configuredWorkerSecret,
+        string configuredGrantSecret,
+        string? presentedCredential,
+        IOptionsMonitor<AuthenticationSchemeOptions> options,
+        ILoggerFactory loggerFactory)
     {
         var context = new DefaultHttpContext();
         if (presentedCredential is not null)
@@ -639,7 +746,12 @@ public sealed class PlayerPortalApiTests
             context.Request.Headers.Authorization = presentedCredential;
         }
 
-        var handler = new PlayerPortalWorkerAuthenticationHandler(options, loggerFactory, UrlEncoder.Default, new PlayerPortalWorkerCredential(configuredSecret));
+        var handler = new PlayerPortalWorkerAuthenticationHandler(
+            options,
+            loggerFactory,
+            UrlEncoder.Default,
+            new PlayerPortalWorkerCredential(configuredWorkerSecret),
+            new PlayerPortalGrantCredential(configuredGrantSecret));
         var authenticationHandler = (IAuthenticationHandler)handler;
         await authenticationHandler.InitializeAsync(new AuthenticationScheme(PlayerPortalApiDefaults.WorkerAuthenticationScheme, "", typeof(PlayerPortalWorkerAuthenticationHandler)), context).ConfigureAwait(false);
         return await authenticationHandler.AuthenticateAsync().ConfigureAwait(false);
