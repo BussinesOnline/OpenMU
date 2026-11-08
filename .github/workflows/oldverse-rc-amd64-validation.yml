@@ -1,0 +1,124 @@
+name: MU OLDVERSE native AMD64 RC validation
+
+on:
+  push:
+    branches:
+      - codex/oldverse-rc-amd64-validation-20261108
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Confirm native x86_64 runner
+        run: test "$(uname -m)" = x86_64
+
+      - name: Build the RC image from the pinned source commit
+        run: |
+          docker build --platform linux/amd64 \
+            --file src/Startup/Dockerfile \
+            --tag mu-oldverse/openmu:rc-9344df176-20261108 \
+            src
+          docker image inspect mu-oldverse/openmu:rc-9344df176-20261108 \
+            --format 'image_id={{.Id}} platform={{.Os}}/{{.Architecture}}'
+
+      - name: Start disposable PostgreSQL and GameServer
+        env:
+          POSTGRES_IMAGE: postgres@sha256:3a4264520e121176619f54ff867d12774bc81e95e7b84db58d63bccdb6144b81
+          OPENMU_IMAGE: mu-oldverse/openmu:rc-9344df176-20261108
+        run: |
+          set -euo pipefail
+          DB_PASSWORD="$(openssl rand -hex 24)"
+          docker network create --internal oldverse-rc-db
+          docker network create oldverse-rc-loopback
+          docker volume create oldverse-rc-db-data
+          docker run -d --name oldverse-rc-db \
+            --network oldverse-rc-db --network-alias db \
+            --volume oldverse-rc-db-data:/var/lib/postgresql \
+            --env POSTGRES_DB=openmu --env POSTGRES_USER=postgres \
+            --env POSTGRES_PASSWORD="$DB_PASSWORD" \
+            "$POSTGRES_IMAGE"
+
+          for attempt in $(seq 1 60); do
+            if docker exec oldverse-rc-db pg_isready -U postgres -d openmu >/dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+          docker exec oldverse-rc-db pg_isready -U postgres -d openmu
+
+          docker run -d --name oldverse-rc-game \
+            --network oldverse-rc-db \
+            --publish 127.0.0.1:44406:44406 \
+            --publish 127.0.0.1:45901:45901 \
+            --publish 127.0.0.1:45902:45902 \
+            --publish 127.0.0.1:45903:45903 \
+            --publish 127.0.0.1:45904:45904 \
+            --publish 127.0.0.1:45905:45905 \
+            --publish 127.0.0.1:45906:45906 \
+            --publish 127.0.0.1:45980:45980 \
+            --env DB_HOST=db --env DB_ADMIN_USER=postgres \
+            --env DB_ADMIN_PW="$DB_PASSWORD" \
+            --env OPENMU_ACTOR_ADDRESS=0.0.0.0 \
+            --env OPENMU_ACTOR_PORT=45999 --env RESOLVE_IP=loopback \
+            "$OPENMU_IMAGE" -adminpanel:disabled
+          docker network connect oldverse-rc-loopback oldverse-rc-game
+
+          schema_ready=false
+          for attempt in $(seq 1 180); do
+            if [ "$(docker inspect oldverse-rc-game --format '{{.State.Running}}')" != true ]; then
+              docker logs oldverse-rc-game
+              exit 1
+            fi
+            if docker exec oldverse-rc-db psql -X -U postgres -d openmu -Atc \
+              "SELECT to_regclass('config.\"GameConfiguration\"') IS NOT NULL" 2>/dev/null | grep -qx t; then
+              schema_ready=true
+              break
+            fi
+            sleep 2
+          done
+          test "$schema_ready" = true
+
+          python3 - <<'PYPORTS'
+          import socket
+          import time
+
+          for port in (44406, 45901, 45902, 45903, 45904, 45905, 45906, 45980):
+              for attempt in range(30):
+                  try:
+                      with socket.create_connection(("127.0.0.1", port), timeout=2):
+                          break
+                  except OSError:
+                      time.sleep(2)
+              else:
+                  raise SystemExit(f"loopback port {port} did not open")
+          PYPORTS
+
+          if docker logs oldverse-rc-game 2>&1 | grep -Eiq 'Fatal error|Unhandled exception|password authentication failed'; then
+            docker logs oldverse-rc-game
+            exit 1
+          fi
+          test "$(docker inspect oldverse-rc-game --format '{{.State.Running}}')" = true
+          PG_VERSION="$(docker exec oldverse-rc-db psql -U postgres -d openmu -Atc 'SHOW server_version')"
+          IMAGE_ID="$(docker image inspect "$OPENMU_IMAGE" --format '{{.Id}}')"
+          {
+            echo "native_arch=$(uname -m)"
+            echo "openmu_image_id=$IMAGE_ID"
+            echo "postgres_version=$PG_VERSION"
+            echo "schema=config.GameConfiguration present"
+            echo "loopback_ports=44406,45901-45906,45980"
+            echo "openmu_container_state=$(docker inspect oldverse-rc-game --format '{{.State.Status}}')"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo 'native_amd64_startup=PASS'
+
+      - name: Clean up disposable test stack
+        if: always()
+        run: |
+          docker rm -f oldverse-rc-game oldverse-rc-db >/dev/null 2>&1 || true
+          docker network rm oldverse-rc-db oldverse-rc-loopback >/dev/null 2>&1 || true
+          docker volume rm oldverse-rc-db-data >/dev/null 2>&1 || true
