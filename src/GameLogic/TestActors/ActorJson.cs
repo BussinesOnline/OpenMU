@@ -54,7 +54,8 @@ public static class ActorJson
 
     /// <summary>
     /// Flattens an event into the object the protocol writes: sequence number, timestamp, type and
-    /// then its own fields.
+    /// then its own fields. Event fields that collide with protocol metadata are retained under a
+    /// <c>field_</c>-prefixed key so they cannot replace the event envelope.
     /// </summary>
     /// <param name="actorEvent">The event.</param>
     /// <returns>The dictionary.</returns>
@@ -69,7 +70,8 @@ public static class ActorJson
 
         foreach (var field in actorEvent.Fields)
         {
-            result[field.Name] = field.Value;
+            var name = result.ContainsKey(field.Name) ? $"field_{field.Name}" : field.Name;
+            result[name] = field.Value;
         }
 
         return result;

@@ -144,6 +144,25 @@ public sealed class ActorProtocolHandler
         return null;
     }
 
+    private static EnterMiniGameCommand CreateEnterMiniGameCommand(JsonElement request)
+    {
+        var type = GetSupportedMiniGameType(request);
+        var highestLevel = type == MUnique.OpenMU.DataModel.Configuration.MiniGameType.DevilSquare ? 7 : 8;
+        var level = GetInt32(request, "level", 1, highestLevel) ?? 1;
+        var ticketSlot = GetByte(request, "ticket_slot") ?? byte.MaxValue;
+        return new EnterMiniGameCommand(type, level, ticketSlot);
+    }
+
+    private static MUnique.OpenMU.DataModel.Configuration.MiniGameType GetSupportedMiniGameType(JsonElement request)
+    {
+        return GetString(request, "type")?.ToLowerInvariant() switch
+        {
+            "devilsquare" or "devil_square" => MUnique.OpenMU.DataModel.Configuration.MiniGameType.DevilSquare,
+            "bloodcastle" or "blood_castle" => MUnique.OpenMU.DataModel.Configuration.MiniGameType.BloodCastle,
+            _ => throw new ArgumentException("'type' must be 'DevilSquare' or 'BloodCastle'."),
+        };
+    }
+
     private static ValueTask WriteFailureAsync(Func<string, ValueTask> writer, string? id, string code, string error)
         => writer(ActorJson.WriteResponse(id, ActorCommandResult.Failure(code, error)));
 
@@ -242,6 +261,7 @@ public sealed class ActorProtocolHandler
             "say" => new SayCommand(GetString(request, "text") ?? string.Empty),
             "pickup" => new PickupCommand(GetUInt16(request, "id") ?? 0),
             "warp" => new WarpCommand(GetInt32(request, "gate") ?? -1),
+            "enter_minigame" => CreateEnterMiniGameCommand(request),
             _ => null,
         };
 

@@ -7,6 +7,7 @@ namespace MUnique.OpenMU.GameLogic.TestActors;
 using MUnique.OpenMU.AttributeSystem;
 using MUnique.OpenMU.DataModel.Configuration;
 using MUnique.OpenMU.GameLogic.Attributes;
+using MUnique.OpenMU.GameLogic.MiniGames;
 using MUnique.OpenMU.GameLogic.NPC;
 using MUnique.OpenMU.GameLogic.Views;
 using MUnique.OpenMU.GameLogic.Views.Character;
@@ -39,7 +40,10 @@ public sealed class RecordingViewPlugInContainer :
     IObjectsOutOfScopePlugIn,
     IObjectMovedPlugIn,
     IShowMessagePlugIn,
-    IShowSkillAnimationPlugIn
+    IShowSkillAnimationPlugIn,
+    IShowMiniGameEnterResultPlugIn,
+    IUpdateMiniGameStateViewPlugIn,
+    IMiniGameScoreTableViewPlugin
 {
     /// <summary>
     /// The attributes whose changes are recorded as <c>stat</c> events. The engine pushes an update
@@ -237,6 +241,42 @@ public sealed class RecordingViewPlugInContainer :
             "message",
             new ActorEventField("message", message),
             new ActorEventField("message_type", messageType.ToString()));
+        return ValueTask.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public ValueTask ShowResultAsync(MiniGameType miniGameType, MUnique.OpenMU.GameLogic.PlayerActions.MiniGames.EnterResult enterResult)
+    {
+        this.Log.Append(
+            "mini_game_enter_result",
+            new ActorEventField("mini_game_type", miniGameType.ToString()),
+            new ActorEventField("result", enterResult.ToString()));
+        return ValueTask.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public ValueTask UpdateStateAsync(MiniGameType type, MiniGameState state)
+    {
+        this.Log.Append(
+            "mini_game_state",
+            new ActorEventField("mini_game_type", type.ToString()),
+            new ActorEventField("state", state.ToString()));
+        return ValueTask.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public ValueTask ShowScoreTableAsync(byte playerRank, IReadOnlyCollection<(string Player, int Score, int BonusExp, int BonusMoney)> scores)
+    {
+        this.Log.Append(
+            "mini_game_score",
+            new ActorEventField("rank", playerRank),
+            new ActorEventField("scores", scores.Select(score => new Dictionary<string, object?>
+            {
+                ["player"] = score.Player,
+                ["score"] = score.Score,
+                ["bonus_exp"] = score.BonusExp,
+                ["bonus_money"] = score.BonusMoney,
+            }).ToArray()));
         return ValueTask.CompletedTask;
     }
 

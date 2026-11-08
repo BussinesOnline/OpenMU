@@ -13,6 +13,7 @@ using MUnique.OpenMU.GameLogic.Attributes;
 using MUnique.OpenMU.GameLogic.PlayerActions;
 using MUnique.OpenMU.GameLogic.PlayerActions.Chat;
 using MUnique.OpenMU.GameLogic.PlayerActions.Items;
+using MUnique.OpenMU.GameLogic.PlayerActions.MiniGames;
 using MUnique.OpenMU.GameLogic.PlayerActions.Skills;
 using MUnique.OpenMU.GameLogic.PlugIns;
 using MUnique.OpenMU.Pathfinding;
@@ -244,6 +245,7 @@ public sealed class ScriptedIntelligence : IAsyncDisposable
             SayCommand say => this.SayAsync(say),
             PickupCommand pickup => this.PickupAsync(pickup),
             WarpCommand warp => this.WarpAsync(warp),
+            EnterMiniGameCommand enterMiniGame => this.EnterMiniGameAsync(enterMiniGame),
             _ => ValueTask.FromResult(ActorCommandResult.Failure(ActorErrorCodes.Failed, $"Unknown command '{command.Name}'.")),
         };
     }
@@ -588,6 +590,72 @@ public sealed class ScriptedIntelligence : IAsyncDisposable
                     this._player.Name,
                     command.DropId);
                 return ActorCommandResult.Success(new ActorEventField("id", command.DropId));
+            },
+            CancellationToken.None).ConfigureAwait(false);
+    }
+
+    private async ValueTask<ActorCommandResult> EnterMiniGameAsync(EnterMiniGameCommand command)
+    {
+        return await this._player.RunPersistenceExclusiveAsync(
+            async () =>
+            {
+                if (this._player.CurrentMiniGame is not null)
+                {
+                    return ActorCommandResult.Failure(ActorErrorCodes.Failed, "The actor is already in a mini game.");
+                }
+
+                var definition = this._player.GameContext.Configuration.MiniGameDefinitions
+                    .FirstOrDefault(candidate => candidate.Type == command.Type && candidate.GameLevel == command.Level);
+                var ticketDefinition = definition?.TicketItem;
+                var ticketCountBefore = ticketDefinition is null
+                    ? 0
+                    : this._player.Inventory?.FindItemsByDefinition(ticketDefinition).Count() ?? 0;
+                var mapBefore = this._player.CurrentMap?.Definition.Number;
+                var sequenceBefore = this._player.EventLog.LastSequence;
+
+                // Use the production action verbatim: ticket validation/consumption, level brackets,
+                // fees, event availability and map transfer stay in native game logic.
+                await new EnterMiniGameAction()
+                    .TryEnterMiniGameAsync(this._player, command.Type, command.Level, command.TicketSlot)
+                    .ConfigureAwait(false);
+
+                if (this._player.CurrentMiniGame?.Definition.Type != command.Type
+                    || this._player.CurrentMiniGame.Definition.GameLevel != command.Level)
+                {
+                    var refusal = this._player.EventLog.Since(sequenceBefore)
+                        .LastOrDefault(actorEvent => actorEvent.Type == "mini_game_enter_result");
+                    var reason = refusal?.Fields.FirstOrDefault(field => field.Name == "result").Value?.ToString()
+                        ?? "entry refused by native game logic";
+                    this._player.EventLog.Append(
+                        "mini_game_entry_refused",
+                        new ActorEventField("mini_game_type", command.Type.ToString()),
+                        new ActorEventField("level", command.Level),
+                        new ActorEventField("reason", reason));
+                    return ActorCommandResult.Failure("event_entry_refused", reason);
+                }
+
+                var ticketCountAfter = ticketDefinition is null
+                    ? 0
+                    : this._player.Inventory?.FindItemsByDefinition(ticketDefinition).Count() ?? 0;
+                var mapAfter = this._player.CurrentMap?.Definition.Number;
+                this._player.EventLog.Append(
+                    "mini_game_entry",
+                    new ActorEventField("mini_game_type", command.Type.ToString()),
+                    new ActorEventField("level", command.Level),
+                    new ActorEventField("map_before", mapBefore),
+                    new ActorEventField("map_after", mapAfter),
+                    new ActorEventField("state", this._player.CurrentMiniGame.State.ToString()),
+                    new ActorEventField("ticket_count_before", ticketCountBefore),
+                    new ActorEventField("ticket_count_after", ticketCountAfter));
+
+                return ActorCommandResult.Success(
+                    new ActorEventField("type", command.Type.ToString()),
+                    new ActorEventField("level", command.Level),
+                    new ActorEventField("map_before", mapBefore),
+                    new ActorEventField("map_after", mapAfter),
+                    new ActorEventField("state", this._player.CurrentMiniGame.State.ToString()),
+                    new ActorEventField("ticket_count_before", ticketCountBefore),
+                    new ActorEventField("ticket_count_after", ticketCountAfter));
             },
             CancellationToken.None).ConfigureAwait(false);
     }

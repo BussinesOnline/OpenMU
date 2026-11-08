@@ -81,6 +81,10 @@ public class ActorProtocolHandlerTests
     [TestCase("""{"cmd":"spawn","actor":"test1","server":1.5}""")]
     [TestCase("""{"cmd":"walk","actor":"test1","x":300,"y":132}""")]
     [TestCase("""{"cmd":"skill","actor":"test1","skill":-5,"target":"x"}""")]
+    [TestCase("""{"cmd":"enter_minigame","actor":"test1","type":"DevilSquare","level":0}""")]
+    [TestCase("""{"cmd":"enter_minigame","actor":"test1","type":"DevilSquare","level":8}""")]
+    [TestCase("""{"cmd":"enter_minigame","actor":"test1","type":"BloodCastle","level":9}""")]
+    [TestCase("""{"cmd":"enter_minigame","actor":"test1","type":"DevilSquare","ticket_slot":256}""")]
     [TestCase("""{"cmd":"pickup","actor":"test1","id":70000}""")]
     [TestCase("""{"cmd":"attack","actor":"test1","target":"x","times":0}""")]
     [TestCase("""{"cmd":"bots","action":"on","count":-1}""")]
@@ -98,6 +102,27 @@ public class ActorProtocolHandlerTests
         Assert.That(lines.Single().GetProperty("ok").GetBoolean(), Is.False);
         Assert.That(lines.Single().GetProperty("code").GetString(), Is.EqualTo(ActorErrorCodes.BadRequest));
         registry.Verify(r => r.SpawnAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<byte?>()), Times.Never);
+    }
+
+    /// <summary>
+    /// The TestActors event-entry adapter cannot invoke event types whose client flow it does not
+    /// support, instead of accidentally providing an alternate route into unrelated events.
+    /// </summary>
+    /// <returns>The task.</returns>
+    [Test]
+    public async Task UnsupportedMiniGameTypeIsRefusedAsync()
+    {
+        var gameContext = ActorTestHelper.CreateGameContext();
+        await using var actor = await ActorTestHelper.CreateActorAsync(gameContext, "test1", "Actor1").ConfigureAwait(false);
+        var registry = new Mock<IActorRegistry>(MockBehavior.Strict);
+        registry.Setup(r => r.FindAsync("test1")).Returns(ValueTask.FromResult<ScriptedPlayer?>(actor));
+        var lines = new ResponseCollector();
+        var handler = new ActorProtocolHandler(registry.Object, CreateBotsController());
+
+        await handler.HandleLineAsync("""{"cmd":"enter_minigame","actor":"test1","type":"IllusionTemple","level":1}""", lines.WriteAsync, CancellationToken.None).ConfigureAwait(false);
+
+        Assert.That(lines.Single().GetProperty("ok").GetBoolean(), Is.False);
+        Assert.That(lines.Single().GetProperty("code").GetString(), Is.EqualTo(ActorErrorCodes.BadRequest));
     }
 
     /// <summary>
