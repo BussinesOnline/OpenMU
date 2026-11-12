@@ -135,7 +135,7 @@ public sealed class PlayerPortalPostgreSqlTests
                 Assert.That(await setupRanking.SaveChangesAsync().ConfigureAwait(false), Is.True);
                 rankingConfiguration.CharacterClasses.Add(new MUnique.OpenMU.Persistence.BasicModel.CharacterClass
                 {
-                    Id = characterClass.Id,
+                    Id = ((MUnique.OpenMU.Persistence.IIdentifiable)characterClass).Id,
                     Name = characterClass.Name,
                     Number = characterClass.Number,
                 });
