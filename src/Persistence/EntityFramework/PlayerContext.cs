@@ -627,7 +627,7 @@ internal class PlayerContext : CachingEntityFrameworkContext, IPlayerContext
                 .ConfigureAwait(false);
 
             return entries
-                .Select(entry => new CharacterSummary(entry.Name, entry.ClassName, (int)entry.Level, (int)entry.MasterLevel, (int)entry.Resets))
+                .Select(entry => new CharacterSummary(entry.Name, entry.ClassName, (int)(entry.Level ?? 0f), (int)(entry.MasterLevel ?? 0f), (int)(entry.Resets ?? 0f)))
                 .ToList();
         }
     }
@@ -648,7 +648,7 @@ internal class PlayerContext : CachingEntityFrameworkContext, IPlayerContext
                 .ConfigureAwait(false);
 
             return entries
-                .Select(entry => new CharacterSummary(entry.Name, entry.ClassName, (int)entry.Level, (int)entry.MasterLevel, (int)entry.Resets))
+                .Select(entry => new CharacterSummary(entry.Name, entry.ClassName, (int)(entry.Level ?? 0f), (int)(entry.MasterLevel ?? 0f), (int)(entry.Resets ?? 0f)))
                 .ToList();
         }
     }
@@ -668,7 +668,7 @@ internal class PlayerContext : CachingEntityFrameworkContext, IPlayerContext
                 .FirstOrDefaultAsync(cancellationToken)
                 .ConfigureAwait(false);
 
-            return entry is null ? null : new CharacterSummary(entry.Name, entry.ClassName, (int)entry.Level, (int)entry.MasterLevel, (int)entry.Resets);
+            return entry is null ? null : new CharacterSummary(entry.Name, entry.ClassName, (int)(entry.Level ?? 0f), (int)(entry.MasterLevel ?? 0f), (int)(entry.Resets ?? 0f));
         }
     }
 
