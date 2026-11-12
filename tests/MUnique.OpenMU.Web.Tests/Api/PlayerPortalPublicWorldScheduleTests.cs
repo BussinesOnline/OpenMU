@@ -15,7 +15,7 @@ public sealed class PlayerPortalPublicWorldScheduleTests
 {
     /// <summary>Only active, allow-listed event plugin timetables produce public events.</summary>
     [Test]
-    public void UpcomingEventsUseActiveOpenMuTimetableAndUtc()
+    public void UpcomingEventsUseActiveOpenMuTimetableAndServerTimeZone()
     {
         var now = new DateTimeOffset(2026, 11, 13, 0, 30, 0, TimeSpan.Zero);
         var plugIns = new[]
@@ -40,12 +40,36 @@ public sealed class PlayerPortalPublicWorldScheduleTests
             },
         };
 
-        var events = PlayerPortalPublicWorldSchedule.GetUpcoming(plugIns, null, now);
+        var events = PlayerPortalPublicWorldSchedule.GetUpcoming(plugIns, null, now, TimeZoneInfo.Utc);
 
         Assert.That(events, Has.Count.EqualTo(1));
         Assert.That(events[0].Key, Is.EqualTo("bloodCastle"));
         Assert.That(events[0].StartsAtUtc, Is.EqualTo(new DateTimeOffset(2026, 11, 13, 1, 0, 0, TimeSpan.Zero)));
-        Assert.That(PlayerPortalPublicWorldSchedule.TimeZoneId, Is.EqualTo("UTC"));
+        Assert.That(PlayerPortalPublicWorldSchedule.ResolveServerTimeZone(null), Is.EqualTo(TimeZoneInfo.Utc));
+    }
+
+    /// <summary>Daily plugin times and Castle Siege are interpreted in the configured server time zone.</summary>
+    [Test]
+    public void ConfiguredServerTimeZoneIsUsedForUpcomingEventTimes()
+    {
+        var timeZone = PlayerPortalPublicWorldSchedule.ResolveServerTimeZone("America/Sao_Paulo");
+        var now = new DateTimeOffset(2026, 11, 13, 23, 0, 0, TimeSpan.Zero);
+        var plugIns = new[]
+        {
+            new PlugInConfiguration
+            {
+                TypeId = Guid.Parse("95e68c14-ad87-4b3c-af46-45b8f1c3bc2a"),
+                IsActive = true,
+                CustomConfiguration = "{\"Timetable\":[\"21:00:00\"]}",
+            },
+        };
+        var events = PlayerPortalPublicWorldSchedule.GetUpcoming(plugIns, null, now, timeZone);
+
+        Assert.That(timeZone.Id, Is.EqualTo("America/Sao_Paulo"));
+        Assert.That(events, Has.Count.EqualTo(1));
+        Assert.That(events[0].Key, Is.EqualTo("bloodCastle"));
+        Assert.That(events[0].StartsAtUtc, Is.EqualTo(new DateTimeOffset(2026, 11, 14, 0, 0, 0, TimeSpan.Zero)));
+        Assert.That(PlayerPortalPublicWorldSchedule.ResolveServerTimeZone("OpenMU/InvalidZone"), Is.EqualTo(TimeZoneInfo.Utc));
     }
 
     /// <summary>Castle Siege uses the configured start-state weekday and time only when enabled.</summary>
@@ -75,10 +99,11 @@ public sealed class PlayerPortalPublicWorldScheduleTests
         }
 
         var now = new DateTimeOffset(2026, 11, 13, 23, 0, 0, TimeSpan.Zero);
-        var events = PlayerPortalPublicWorldSchedule.GetUpcoming([], gameConfiguration.CastleSiegeConfiguration, now);
+        var timeZone = PlayerPortalPublicWorldSchedule.ResolveServerTimeZone("America/Sao_Paulo");
+        var events = PlayerPortalPublicWorldSchedule.GetUpcoming([], gameConfiguration.CastleSiegeConfiguration, now, timeZone);
 
         Assert.That(events, Has.Count.EqualTo(1));
         Assert.That(events[0].Key, Is.EqualTo("castleSiege"));
-        Assert.That(events[0].StartsAtUtc, Is.EqualTo(new DateTimeOffset(2026, 11, 14, 20, 0, 0, TimeSpan.Zero)));
+        Assert.That(events[0].StartsAtUtc, Is.EqualTo(new DateTimeOffset(2026, 11, 14, 23, 0, 0, TimeSpan.Zero)));
     }
 }

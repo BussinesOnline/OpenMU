@@ -143,6 +143,9 @@ public sealed class PlayerPortalService(
     {
         var configuration = await configurations.GetOwnerAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
         var now = timeProvider.GetUtcNow();
+        using var systemConfigurationContext = persistence.CreateNewConfigurationContext();
+        var systemConfiguration = (await systemConfigurationContext.GetAsync<SystemConfiguration>(cancellationToken).ConfigureAwait(false)).FirstOrDefault();
+        var serverTimeZone = PlayerPortalPublicWorldSchedule.ResolveServerTimeZone(systemConfiguration?.TimeZoneId);
         using var playerContext = persistence.CreateNewPlayerContext(configuration);
         var characterRanking = await playerContext.GetCharacterRankingAsync(
             LevelDefinitionId,
@@ -175,8 +178,9 @@ public sealed class PlayerPortalService(
             PlayerPortalPublicWorldSchedule.GetUpcoming(
                 configuration.PlugInConfigurations ?? [],
                 configuration.CastleSiegeConfiguration,
-                now),
-            PlayerPortalPublicWorldSchedule.TimeZoneId,
+                now,
+                serverTimeZone),
+            serverTimeZone.Id,
             now);
     }
 

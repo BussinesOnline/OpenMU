@@ -508,7 +508,7 @@ jobs:
           assert isinstance(world["characterRanking"], list)
           assert isinstance(world["guildRanking"], list)
           assert isinstance(world["events"], list)
-          assert world["timeZoneId"] == "UTC"
+          assert world["timeZoneId"] == "America/Sao_Paulo"
           assert all("accountId" not in row for row in world["characterRanking"])
           assert all("masterName" not in row for row in world["guildRanking"])
           print("PASS: public world snapshot returns bounded public fields from disposable PostgreSQL without a player session.")

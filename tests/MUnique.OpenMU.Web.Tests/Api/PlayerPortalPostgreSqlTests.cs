@@ -89,6 +89,8 @@ public sealed class PlayerPortalPostgreSqlTests
             using (var setup = persistence.CreateNewContext())
             {
                 _ = setup.CreateNew<GameConfiguration>();
+                var systemConfiguration = setup.CreateNew<SystemConfiguration>();
+                systemConfiguration.TimeZoneId = "America/Sao_Paulo";
                 Assert.That(await setup.SaveChangesAsync().ConfigureAwait(false), Is.True);
             }
 

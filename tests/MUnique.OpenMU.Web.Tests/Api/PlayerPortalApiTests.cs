@@ -209,6 +209,13 @@ public sealed class PlayerPortalApiTests
             await context.SaveChangesAsync().ConfigureAwait(false);
         }
 
+        using (var context = this._persistence.CreateNewConfigurationContext())
+        {
+            var systemConfiguration = context.CreateNew<SystemConfiguration>();
+            systemConfiguration.TimeZoneId = "America/Sao_Paulo";
+            await context.SaveChangesAsync().ConfigureAwait(false);
+        }
+
         var snapshot = await this._service.GetPublicWorldSnapshotAsync().ConfigureAwait(false);
 
         Assert.That(snapshot.CharacterRanking, Has.Count.EqualTo(1));
@@ -217,7 +224,7 @@ public sealed class PlayerPortalApiTests
         Assert.That(snapshot.GuildRanking.Select(guild => guild.Name), Is.EqualTo(new[] { "HigherScore", "LowerScore" }));
         Assert.That(snapshot.GuildRanking.Select(guild => guild.Score), Is.EqualTo(new[] { 12, 2 }));
         Assert.That(snapshot.Events, Is.Empty);
-        Assert.That(snapshot.TimeZoneId, Is.EqualTo("UTC"));
+        Assert.That(snapshot.TimeZoneId, Is.EqualTo("America/Sao_Paulo"));
         Assert.That(typeof(PlayerPortalPublicWorldSnapshot).GetProperties().Select(property => property.Name),
             Does.Not.Contain("LoginName").And.Not.Contain("AccountId"));
         Assert.That(typeof(PlayerPortalController).GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true)

@@ -12,29 +12,37 @@ using MUnique.OpenMU.PlugIns;
 /// <summary>Builds the public schedule from persisted built-in event configuration.</summary>
 public static class PlayerPortalPublicWorldSchedule
 {
-    private static readonly IReadOnlyDictionary<Guid, string> ScheduledEventKeys = new Dictionary<Guid, string>
+    /// <summary>Resolves the same configured time zone used by the OpenMU GameServer, falling back to UTC.</summary>
+    /// <param name="timeZoneId">The persisted system configuration value.</param>
+    public static TimeZoneInfo ResolveServerTimeZone(string? timeZoneId)
     {
-        [Guid.Parse("95e68c14-ad87-4b3c-af46-45b8f1c3bc2a")] = "bloodCastle",
-        [Guid.Parse("3ad96a70-ed24-4979-80b8-169e461e548f")] = "chaosCastle",
-        [Guid.Parse("61c61a58-211e-4d6a-9ea1-d25e0c4a47c5")] = "devilSquare",
-        [Guid.Parse("a8f3c2d1-9e74-4ecb-8963-08a3697278c4")] = "kanturu",
-        [Guid.Parse("06d18a9e-2919-4c17-9dbc-6e4f7756495c")] = "goldenInvasion",
-        [Guid.Parse("548a76cc-242c-441c-bc9d-6c22745a2d72")] = "redDragonInvasion",
-        [Guid.Parse("4b5d0f55-5b26-4447-b9c0-c272e5d0a141")] = "whiteWizardInvasion",
-    };
+        if (string.IsNullOrWhiteSpace(timeZoneId))
+        {
+            return TimeZoneInfo.Utc;
+        }
 
-    /// <summary>Gets the effective event time zone used by the current OpenMU runtime.</summary>
-    /// <remarks><see cref="MUnique.OpenMU.GameLogic.GameContext.ServerTimeZone"/> defaults to UTC and has no override in the PlayerPortal host.</remarks>
-    public const string TimeZoneId = "UTC";
+        try
+        {
+            // Keep this behavior in sync with Startup.Program.ResolveServerTimeZone.
+            return TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+        }
+        catch (Exception exception) when (exception is TimeZoneNotFoundException or InvalidTimeZoneException)
+        {
+            return TimeZoneInfo.Utc;
+        }
+    }
 
     /// <summary>Gets one upcoming occurrence for each enabled built-in scheduled event.</summary>
-    /// <param name="configuration">The persisted game configuration.</param>
+    /// <param name="plugInConfigurations">The persisted plugin configurations.</param>
+    /// <param name="castleSiegeConfiguration">The persisted Castle Siege configuration, if enabled.</param>
     /// <param name="utcNow">The current UTC time.</param>
+    /// <param name="serverTimeZone">The persisted OpenMU server time zone.</param>
     /// <returns>The next configured occurrence per event, ordered by UTC start time.</returns>
     public static IReadOnlyList<PlayerPortalScheduledEvent> GetUpcoming(
         IEnumerable<PlugInConfiguration> plugInConfigurations,
         CastleSiegeConfiguration? castleSiegeConfiguration,
-        DateTimeOffset utcNow)
+        DateTimeOffset utcNow,
+        TimeZoneInfo serverTimeZone)
     {
         var now = utcNow.ToUniversalTime();
         var horizon = now.AddDays(8);
@@ -42,14 +50,14 @@ public static class PlayerPortalPublicWorldSchedule
 
         foreach (var plugIn in plugInConfigurations)
         {
-            if (!plugIn.IsActive || !ScheduledEventKeys.TryGetValue(plugIn.TypeId, out var key)
+            if (!plugIn.IsActive || GetScheduledEventKey(plugIn.TypeId) is not { } key
                 || !TryReadTimetable(plugIn.CustomConfiguration, out var timetable))
             {
                 continue;
             }
 
             var nextStart = timetable
-                .Select(time => GetNextDailyStart(time, now))
+                .Select(time => GetNextDailyStart(time, now, serverTimeZone))
                 .Where(start => start > now && start <= horizon)
                 .Order()
                 .FirstOrDefault();
@@ -63,7 +71,7 @@ public static class PlayerPortalPublicWorldSchedule
         {
             var nextStart = (castleSiege.StateSchedule ?? [])
                 .Where(entry => entry.State == CastleSiegeState.Start)
-                .Select(entry => GetNextWeeklyStart(entry.DayOfWeek, entry.Hour, entry.Minute, now))
+                .Select(entry => GetNextWeeklyStart(entry.DayOfWeek, entry.Hour, entry.Minute, now, serverTimeZone))
                 .Where(start => start > now && start <= horizon)
                 .Order()
                 .FirstOrDefault();
@@ -78,6 +86,21 @@ public static class PlayerPortalPublicWorldSchedule
             .Select(group => group.MinBy(gameEvent => gameEvent.StartsAtUtc)!)
             .OrderBy(gameEvent => gameEvent.StartsAtUtc)
             .ToArray();
+    }
+
+    private static string? GetScheduledEventKey(Guid plugInTypeId)
+    {
+        return plugInTypeId.ToString("D", CultureInfo.InvariantCulture) switch
+        {
+            "95e68c14-ad87-4b3c-af46-45b8f1c3bc2a" => "bloodCastle",
+            "3ad96a70-ed24-4979-80b8-169e461e548f" => "chaosCastle",
+            "61c61a58-211e-4d6a-9ea1-d25e0c4a47c5" => "devilSquare",
+            "a8f3c2d1-9e74-4ecb-8963-08a3697278c4" => "kanturu",
+            "06d18a9e-2919-4c17-9dbc-6e4f7756495c" => "goldenInvasion",
+            "548a76cc-242c-441c-bc9d-6c22745a2d72" => "redDragonInvasion",
+            "4b5d0f55-5b26-4447-b9c0-c272e5d0a141" => "whiteWizardInvasion",
+            _ => null,
+        };
     }
 
     private static bool TryReadTimetable(string? customConfiguration, out IReadOnlyList<TimeOnly> timetable)
@@ -132,19 +155,37 @@ public static class PlayerPortalPublicWorldSchedule
         return false;
     }
 
-    private static DateTimeOffset GetNextDailyStart(TimeOnly time, DateTimeOffset now)
+    private static DateTimeOffset GetNextDailyStart(TimeOnly time, DateTimeOffset now, TimeZoneInfo serverTimeZone)
     {
-        var today = DateOnly.FromDateTime(now.UtcDateTime);
-        var start = new DateTimeOffset(today.ToDateTime(time, DateTimeKind.Utc));
-        return start > now ? start : start.AddDays(1);
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, serverTimeZone).DateTime);
+        var localStart = DateTime.SpecifyKind(today.ToDateTime(time), DateTimeKind.Unspecified);
+        var startUtc = TimeZoneInfo.ConvertTimeToUtc(localStart, serverTimeZone);
+        var start = new DateTimeOffset(startUtc, TimeSpan.Zero);
+        if (start > now)
+        {
+            return start;
+        }
+
+        localStart = DateTime.SpecifyKind(today.AddDays(1).ToDateTime(time), DateTimeKind.Unspecified);
+        startUtc = TimeZoneInfo.ConvertTimeToUtc(localStart, serverTimeZone);
+        return new DateTimeOffset(startUtc, TimeSpan.Zero);
     }
 
-    private static DateTimeOffset GetNextWeeklyStart(DayOfWeek dayOfWeek, byte hour, byte minute, DateTimeOffset now)
+    private static DateTimeOffset GetNextWeeklyStart(DayOfWeek dayOfWeek, byte hour, byte minute, DateTimeOffset now, TimeZoneInfo serverTimeZone)
     {
-        var today = DateOnly.FromDateTime(now.UtcDateTime);
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, serverTimeZone).DateTime);
         var dayOffset = ((int)dayOfWeek - (int)today.DayOfWeek + 7) % 7;
         var date = today.AddDays(dayOffset);
-        var start = new DateTimeOffset(date.ToDateTime(new TimeOnly(hour, minute), DateTimeKind.Utc));
-        return start > now ? start : start.AddDays(7);
+        var localStart = DateTime.SpecifyKind(date.ToDateTime(new TimeOnly(hour, minute)), DateTimeKind.Unspecified);
+        var startUtc = TimeZoneInfo.ConvertTimeToUtc(localStart, serverTimeZone);
+        var start = new DateTimeOffset(startUtc, TimeSpan.Zero);
+        if (start > now)
+        {
+            return start;
+        }
+
+        localStart = DateTime.SpecifyKind(date.AddDays(7).ToDateTime(new TimeOnly(hour, minute)), DateTimeKind.Unspecified);
+        startUtc = TimeZoneInfo.ConvertTimeToUtc(localStart, serverTimeZone);
+        return new DateTimeOffset(startUtc, TimeSpan.Zero);
     }
 }
