@@ -116,9 +116,10 @@ public sealed class PlayerPortalPostgreSqlTests
 
             // Production characters may not have persisted Master Level attributes. Exercise that
             // nullable scalar projection with PostgreSQL and the same read-only account role.
-            var rankingConfiguration = new MUnique.OpenMU.Persistence.BasicModel.GameConfiguration();
+            MUnique.OpenMU.DataModel.Configuration.GameConfiguration rankingConfiguration;
             using (var setupRanking = persistence.CreateNewContext())
             {
+                rankingConfiguration = (await setupRanking.GetAsync<MUnique.OpenMU.DataModel.Configuration.GameConfiguration>().ConfigureAwait(false)).Single();
                 var account = (await setupRanking.GetAsync<MUnique.OpenMU.DataModel.Entities.Account>().ConfigureAwait(false))
                     .Single(candidate => candidate.LoginName == "portalone");
                 var levelDefinition = setupRanking.CreateNew<MUnique.OpenMU.AttributeSystem.AttributeDefinition>(
@@ -139,14 +140,9 @@ public sealed class PlayerPortalPostgreSqlTests
                 character.CharacterClass = characterClass;
                 character.Attributes.Add(setupRanking.CreateNew<MUnique.OpenMU.AttributeSystem.StatAttribute>(levelDefinition, 400f));
                 character.Attributes.Add(setupRanking.CreateNew<MUnique.OpenMU.AttributeSystem.StatAttribute>(resetsDefinition, 0f));
+                rankingConfiguration.CharacterClasses.Add(characterClass);
                 account.Characters.Add(character);
                 Assert.That(await setupRanking.SaveChangesAsync().ConfigureAwait(false), Is.True);
-                rankingConfiguration.CharacterClasses.Add(new MUnique.OpenMU.Persistence.BasicModel.CharacterClass
-                {
-                    Id = ((MUnique.OpenMU.Persistence.IIdentifiable)characterClass).Id,
-                    Name = characterClass.Name,
-                    Number = characterClass.Number,
-                });
             }
 
             using (var rankingContext = persistence.CreateNewPlayerContext(rankingConfiguration))
