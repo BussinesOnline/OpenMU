@@ -12,6 +12,8 @@ using MUnique.OpenMU.PlugIns;
 /// <summary>Builds the public schedule from persisted built-in event configuration.</summary>
 public static class PlayerPortalPublicWorldSchedule
 {
+    private static readonly Guid CrywolfPlugInTypeId = Guid.Parse("3e8b5c27-9d41-4a6f-b2c8-7f1d6e0a9b34");
+
     /// <summary>Resolves the same configured time zone used by the OpenMU GameServer, falling back to UTC.</summary>
     /// <param name="timeZoneId">The persisted system configuration value.</param>
     public static TimeZoneInfo ResolveServerTimeZone(string? timeZoneId)
@@ -50,8 +52,32 @@ public static class PlayerPortalPublicWorldSchedule
 
         foreach (var plugIn in plugInConfigurations)
         {
-            if (!plugIn.IsActive || GetScheduledEventKey(plugIn.TypeId) is not { } key
-                || !TryReadTimetable(plugIn.CustomConfiguration, out var timetable))
+            if (!plugIn.IsActive || GetScheduledEventKey(plugIn.TypeId) is not { } key)
+            {
+                continue;
+            }
+
+            if (plugIn.TypeId == CrywolfPlugInTypeId)
+            {
+                if (!TryReadCrywolfSchedule(plugIn.CustomConfiguration, out var startDays, out var startTimes))
+                {
+                    continue;
+                }
+
+                var crywolfStart = startDays
+                    .SelectMany(day => startTimes.Select(time => GetNextWeeklyStart(day, time, now, serverTimeZone)))
+                    .Where(start => start > now && start <= horizon)
+                    .Order()
+                    .FirstOrDefault();
+                if (crywolfStart != default)
+                {
+                    events.Add(new PlayerPortalScheduledEvent(key, crywolfStart));
+                }
+
+                continue;
+            }
+
+            if (!TryReadTimetable(plugIn.CustomConfiguration, out var timetable))
             {
                 continue;
             }
@@ -92,6 +118,7 @@ public static class PlayerPortalPublicWorldSchedule
     {
         return plugInTypeId.ToString("D", CultureInfo.InvariantCulture) switch
         {
+            "3e8b5c27-9d41-4a6f-b2c8-7f1d6e0a9b34" => "crywolf",
             "95e68c14-ad87-4b3c-af46-45b8f1c3bc2a" => "bloodCastle",
             "3ad96a70-ed24-4979-80b8-169e461e548f" => "chaosCastle",
             "61c61a58-211e-4d6a-9ea1-d25e0c4a47c5" => "devilSquare",
@@ -101,6 +128,79 @@ public static class PlayerPortalPublicWorldSchedule
             "4b5d0f55-5b26-4447-b9c0-c272e5d0a141" => "whiteWizardInvasion",
             _ => null,
         };
+    }
+
+    private static bool TryReadCrywolfSchedule(
+        string? customConfiguration,
+        out IReadOnlyList<DayOfWeek> startDays,
+        out IReadOnlyList<TimeOnly> startTimes)
+    {
+        startDays = [];
+        startTimes = [];
+        if (string.IsNullOrWhiteSpace(customConfiguration))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(customConfiguration);
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !TryGetProperty(document.RootElement, "StartDays", out var configuredDays)
+                || !TryReadCollection(configuredDays, out var days)
+                || !TryGetProperty(document.RootElement, "StartTimes", out var configuredTimes)
+                || !TryReadCollection(configuredTimes, out var times))
+            {
+                return false;
+            }
+
+            var parsedDays = new List<DayOfWeek>();
+            foreach (var value in days.EnumerateArray())
+            {
+                if (value.ValueKind == JsonValueKind.Number
+                    && value.TryGetInt32(out var dayNumber)
+                    && Enum.IsDefined(typeof(DayOfWeek), dayNumber))
+                {
+                    parsedDays.Add((DayOfWeek)dayNumber);
+                }
+                else if (value.ValueKind == JsonValueKind.String
+                    && Enum.TryParse<DayOfWeek>(value.GetString(), true, out var day)
+                    && Enum.IsDefined(typeof(DayOfWeek), day))
+                {
+                    parsedDays.Add(day);
+                }
+            }
+
+            var parsedTimes = new List<TimeOnly>();
+            foreach (var value in times.EnumerateArray())
+            {
+                if (value.ValueKind == JsonValueKind.String
+                    && TimeOnly.TryParse(value.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var time))
+                {
+                    parsedTimes.Add(time);
+                }
+            }
+
+            startDays = parsedDays.Distinct().Order().ToArray();
+            startTimes = parsedTimes.Distinct().Order().ToArray();
+            return startDays.Count > 0 && startTimes.Count > 0;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryReadCollection(JsonElement value, out JsonElement collection)
+    {
+        collection = value;
+        if (collection.ValueKind == JsonValueKind.Object
+            && TryGetProperty(collection, "$values", out var wrappedValues))
+        {
+            collection = wrappedValues;
+        }
+
+        return collection.ValueKind == JsonValueKind.Array;
     }
 
     private static bool TryReadTimetable(string? customConfiguration, out IReadOnlyList<TimeOnly> timetable)
@@ -115,8 +215,8 @@ public static class PlayerPortalPublicWorldSchedule
         {
             using var document = JsonDocument.Parse(customConfiguration);
             if (document.RootElement.ValueKind != JsonValueKind.Object
-                || !TryGetProperty(document.RootElement, "Timetable", out var times)
-                || times.ValueKind != JsonValueKind.Array)
+                || !TryGetProperty(document.RootElement, "Timetable", out var configuredTimes)
+                || !TryReadCollection(configuredTimes, out var times))
             {
                 return false;
             }
@@ -173,10 +273,15 @@ public static class PlayerPortalPublicWorldSchedule
 
     private static DateTimeOffset GetNextWeeklyStart(DayOfWeek dayOfWeek, byte hour, byte minute, DateTimeOffset now, TimeZoneInfo serverTimeZone)
     {
+        return GetNextWeeklyStart(dayOfWeek, new TimeOnly(hour, minute), now, serverTimeZone);
+    }
+
+    private static DateTimeOffset GetNextWeeklyStart(DayOfWeek dayOfWeek, TimeOnly time, DateTimeOffset now, TimeZoneInfo serverTimeZone)
+    {
         var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, serverTimeZone).DateTime);
         var dayOffset = ((int)dayOfWeek - (int)today.DayOfWeek + 7) % 7;
         var date = today.AddDays(dayOffset);
-        var localStart = DateTime.SpecifyKind(date.ToDateTime(new TimeOnly(hour, minute)), DateTimeKind.Unspecified);
+        var localStart = DateTime.SpecifyKind(date.ToDateTime(time), DateTimeKind.Unspecified);
         var startUtc = TimeZoneInfo.ConvertTimeToUtc(localStart, serverTimeZone);
         var start = new DateTimeOffset(startUtc, TimeSpan.Zero);
         if (start > now)
@@ -184,7 +289,7 @@ public static class PlayerPortalPublicWorldSchedule
             return start;
         }
 
-        localStart = DateTime.SpecifyKind(date.AddDays(7).ToDateTime(new TimeOnly(hour, minute)), DateTimeKind.Unspecified);
+        localStart = DateTime.SpecifyKind(date.AddDays(7).ToDateTime(time), DateTimeKind.Unspecified);
         startUtc = TimeZoneInfo.ConvertTimeToUtc(localStart, serverTimeZone);
         return new DateTimeOffset(startUtc, TimeSpan.Zero);
     }
