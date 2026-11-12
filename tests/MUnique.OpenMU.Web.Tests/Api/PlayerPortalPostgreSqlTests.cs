@@ -121,6 +121,14 @@ public sealed class PlayerPortalPostgreSqlTests
             {
                 var account = (await setupRanking.GetAsync<MUnique.OpenMU.DataModel.Entities.Account>().ConfigureAwait(false))
                     .Single(candidate => candidate.LoginName == "portalone");
+                var levelDefinition = setupRanking.CreateNew<MUnique.OpenMU.DataModel.Configuration.AttributeDefinition>(
+                    MUnique.OpenMU.GameLogic.Attributes.Stats.Level.Id,
+                    MUnique.OpenMU.GameLogic.Attributes.Stats.Level.Designation,
+                    MUnique.OpenMU.GameLogic.Attributes.Stats.Level.Description);
+                var resetsDefinition = setupRanking.CreateNew<MUnique.OpenMU.DataModel.Configuration.AttributeDefinition>(
+                    MUnique.OpenMU.GameLogic.Attributes.Stats.Resets.Id,
+                    MUnique.OpenMU.GameLogic.Attributes.Stats.Resets.Designation,
+                    MUnique.OpenMU.GameLogic.Attributes.Stats.Resets.Description);
                 var characterClass = setupRanking.CreateNew<MUnique.OpenMU.DataModel.Configuration.CharacterClass>();
                 characterClass.Name = "Dark Wizard";
                 characterClass.Number = 1;
@@ -129,8 +137,8 @@ public sealed class PlayerPortalPostgreSqlTests
                 character.CharacterSlot = 0;
                 character.CharacterStatus = MUnique.OpenMU.DataModel.Entities.CharacterStatus.Normal;
                 character.CharacterClass = characterClass;
-                character.Attributes.Add(setupRanking.CreateNew<MUnique.OpenMU.AttributeSystem.StatAttribute>(MUnique.OpenMU.GameLogic.Attributes.Stats.Level, 400f));
-                character.Attributes.Add(setupRanking.CreateNew<MUnique.OpenMU.AttributeSystem.StatAttribute>(MUnique.OpenMU.GameLogic.Attributes.Stats.Resets, 0f));
+                character.Attributes.Add(setupRanking.CreateNew<MUnique.OpenMU.AttributeSystem.StatAttribute>(levelDefinition, 400f));
+                character.Attributes.Add(setupRanking.CreateNew<MUnique.OpenMU.AttributeSystem.StatAttribute>(resetsDefinition, 0f));
                 account.Characters.Add(character);
                 Assert.That(await setupRanking.SaveChangesAsync().ConfigureAwait(false), Is.True);
                 rankingConfiguration.CharacterClasses.Add(new MUnique.OpenMU.Persistence.BasicModel.CharacterClass
