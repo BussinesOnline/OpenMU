@@ -152,6 +152,7 @@ public sealed class PlayerPortalPostgreSqlTests
                 Assert.That(missingMasterLevel.Level, Is.EqualTo(400));
                 Assert.That(missingMasterLevel.MasterLevel, Is.Zero);
                 Assert.That(missingMasterLevel.Resets, Is.Zero);
+                Assert.That(missingMasterLevel.CharacterClassName, Is.EqualTo("Dark Wizard"));
             }
 
             await using var verify = new NpgsqlConnection(requiredAdminConnection);
