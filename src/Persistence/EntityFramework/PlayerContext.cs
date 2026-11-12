@@ -764,8 +764,8 @@ internal class PlayerContext : CachingEntityFrameworkContext, IPlayerContext
         return characters.Select(character => new CharacterRankingRow(
             character.Name,
             character.RawCharacterClass!.Name,
-            character.RawAttributes.Where(a => a.DefinitionId == levelAttributeId).Select(a => a.Value).FirstOrDefault(),
-            character.RawAttributes.Where(a => a.DefinitionId == masterLevelAttributeId).Select(a => a.Value).FirstOrDefault(),
-            character.RawAttributes.Where(a => a.DefinitionId == resetsAttributeId).Select(a => a.Value).FirstOrDefault()));
+            character.RawAttributes.Where(a => a.DefinitionId == levelAttributeId).Select(a => (float?)a.Value).FirstOrDefault() ?? 0f,
+            character.RawAttributes.Where(a => a.DefinitionId == masterLevelAttributeId).Select(a => (float?)a.Value).FirstOrDefault() ?? 0f,
+            character.RawAttributes.Where(a => a.DefinitionId == resetsAttributeId).Select(a => (float?)a.Value).FirstOrDefault() ?? 0f));
     }
 }
