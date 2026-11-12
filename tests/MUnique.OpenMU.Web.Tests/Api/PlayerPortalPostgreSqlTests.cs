@@ -125,7 +125,7 @@ public sealed class PlayerPortalPostgreSqlTests
                 characterClass.Name = "Dark Wizard";
                 characterClass.Number = 1;
                 var character = setupRanking.CreateNew<MUnique.OpenMU.DataModel.Entities.Character>();
-                character.Name = "NoMasterAttribute";
+                character.Name = "NoMaster";
                 character.CharacterSlot = 0;
                 character.CharacterStatus = MUnique.OpenMU.DataModel.Entities.CharacterStatus.Normal;
                 character.CharacterClass = characterClass;
@@ -143,7 +143,7 @@ public sealed class PlayerPortalPostgreSqlTests
                     MUnique.OpenMU.GameLogic.Attributes.Stats.MasterLevel.Id,
                     MUnique.OpenMU.GameLogic.Attributes.Stats.Resets.Id,
                     10).ConfigureAwait(false);
-                var missingMasterLevel = ranking.Single(character => character.Name == "NoMasterAttribute");
+                var missingMasterLevel = ranking.Single(character => character.Name == "NoMaster");
                 Assert.That(missingMasterLevel.Level, Is.EqualTo(400));
                 Assert.That(missingMasterLevel.MasterLevel, Is.Zero);
                 Assert.That(missingMasterLevel.Resets, Is.Zero);
