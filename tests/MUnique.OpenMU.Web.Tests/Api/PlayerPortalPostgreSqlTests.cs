@@ -133,7 +133,12 @@ public sealed class PlayerPortalPostgreSqlTests
                 character.Attributes.Add(setupRanking.CreateNew<MUnique.OpenMU.AttributeSystem.StatAttribute>(MUnique.OpenMU.GameLogic.Attributes.Stats.Resets, 0f));
                 account.Characters.Add(character);
                 Assert.That(await setupRanking.SaveChangesAsync().ConfigureAwait(false), Is.True);
-                rankingConfiguration.CharacterClasses.Add(characterClass);
+                rankingConfiguration.CharacterClasses.Add(new MUnique.OpenMU.Persistence.BasicModel.CharacterClass
+                {
+                    Id = characterClass.Id,
+                    Name = characterClass.Name,
+                    Number = characterClass.Number,
+                });
             }
 
             using (var rankingContext = persistence.CreateNewPlayerContext(rankingConfiguration))
