@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - feat/openmu-player-api-2c
+      - codex/playerportal-terms-acceptance
     paths:
       - .github/workflows/phase2f-player-portal-isolation.yml
       - src/Dapr/PlayerPortal.Host/**
@@ -13,6 +14,7 @@ on:
   push:
     branches:
       - feat/openmu-player-api-2c
+      - codex/openmu-public-rankings-events
     paths:
       - .github/workflows/phase2f-player-portal-isolation.yml
       - deploy/all-in-one/docker-compose.player-portal.yml
@@ -459,15 +461,33 @@ jobs:
           login="ci$(openssl rand -hex 3)"
           password="SyntheticPass1"
           printf '{"loginName":"%s","password":"%s"}\n' "$login" "$password" > "$scratch/credentials.json"
+          terms_version="mu-oldverse-terms-draft-1"
+          printf '{"loginName":"%s","password":"%s","termsAccepted":true,"termsVersion":"%s"}\n' \
+            "$login" "$password" "$terms_version" > "$scratch/registration.json"
           printf '{"loginName":"%s","password":"WrongSynthetic1"}\n' "$login" > "$scratch/wrong-credentials.json"
           code="$(curl --silent --output /dev/null --write-out '%{http_code}' \
-            -H 'Content-Type: application/json' --data-binary "@$scratch/credentials.json" \
+            -H 'Content-Type: application/json' --data-binary "@$scratch/registration.json" \
             http://127.0.0.1:18080/player-portal/v1/accounts)"
           [[ "$code" == "401" ]] || { echo "FAIL: request without Worker authentication returned HTTP $code"; exit 1; }
           echo "PASS: request without Worker authentication returned HTTP 401."
+          code="$(curl --silent --output "$scratch/world.json" --write-out '%{http_code}' \
+            -H "Authorization: Bearer $PORTAL_CI_WORKER_TOKEN" \
+            http://127.0.0.1:18080/player-portal/v1/world)"
+          [[ "$code" == "200" ]] || { echo "FAIL: public world snapshot HTTP $code"; exit 1; }
+          python3 - "$scratch/world.json" <<'PY'
+          import json, sys
+          world = json.load(open(sys.argv[1], encoding="utf-8"))
+          assert isinstance(world["characterRanking"], list)
+          assert isinstance(world["guildRanking"], list)
+          assert isinstance(world["events"], list)
+          assert world["timeZoneId"] == "UTC"
+          assert all("accountId" not in row for row in world["characterRanking"])
+          assert all("masterName" not in row for row in world["guildRanking"])
+          print("PASS: public world snapshot returns bounded public fields from disposable PostgreSQL without a player session.")
+          PY
           code="$(curl --silent --output "$scratch/response.json" --write-out '%{http_code}' \
             -H "Authorization: Bearer $PORTAL_CI_WORKER_TOKEN" -H 'Content-Type: application/json' \
-            --data-binary "@$scratch/credentials.json" http://127.0.0.1:18080/player-portal/v1/accounts)"
+            --data-binary "@$scratch/registration.json" http://127.0.0.1:18080/player-portal/v1/accounts)"
           [[ "$code" == "202" ]] || { echo "FAIL: synthetic registration HTTP $code"; exit 1; }
           persisted="$("${compose[@]}" exec -T database psql -U portal_ci_admin -d openmu -Atc "SELECT count(*) FROM data.\"Account\" WHERE \"LoginName\" = '$login'")"
           [[ "$persisted" == "1" ]] || { echo "FAIL: synthetic account persistence was not confirmed."; exit 1; }
@@ -479,7 +499,7 @@ jobs:
           echo "PASS: incorrect-password login returned HTTP 401."
           code="$(curl --silent --output /dev/null --write-out '%{http_code}' \
             -H 'Authorization: Bearer invalid-synthetic-worker-token' -H 'Content-Type: application/json' \
-            --data-binary "@$scratch/credentials.json" http://127.0.0.1:18080/player-portal/v1/accounts)"
+            --data-binary "@$scratch/registration.json" http://127.0.0.1:18080/player-portal/v1/accounts)"
           [[ "$code" == "401" ]] || { echo "FAIL: invalid Worker credential returned HTTP $code"; exit 1; }
           code="$(curl --silent --output "$scratch/login.json" --write-out '%{http_code}' \
             -H "Authorization: Bearer $PORTAL_CI_WORKER_TOKEN" -H 'Content-Type: application/json' \

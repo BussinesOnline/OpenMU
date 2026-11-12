@@ -106,6 +106,17 @@ public class GuildServerInMemoryContext : InMemoryContext, IGuildServerContext
         return allGuilds.OrderBy(g => g.Name).Skip(skip).Take(count).ToList();
     }
 
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<DataModel.Entities.Guild>> GetGuildsOrderedByScoreAsync(int count, CancellationToken cancellationToken = default)
+    {
+        var allGuilds = await this.Provider.GetRepository<DataModel.Entities.Guild>().GetAllAsync(cancellationToken).ConfigureAwait(false);
+        return allGuilds
+            .OrderByDescending(guild => guild.Score)
+            .ThenBy(guild => guild.Name, StringComparer.Ordinal)
+            .Take(count)
+            .ToList();
+    }
+
     /// <inheritdoc/>
     public async ValueTask<IReadOnlyList<DataModel.Entities.Guild>> SearchGuildsAsync(string searchTerm, int skip, int count, CancellationToken cancellationToken = default)
     {

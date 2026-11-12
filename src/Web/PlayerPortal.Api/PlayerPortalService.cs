@@ -23,6 +23,8 @@ public sealed class PlayerPortalService(
     PlayerLoginAttemptLimiter attempts,
     TimeProvider timeProvider)
 {
+    private const int PublicRankingMaximumEntries = 10;
+    private const int PublicRankingCandidateEntries = 50;
     private static readonly string DummyPasswordHash = BCrypt.Net.BCrypt.HashPassword("not-a-real-player-password", workFactor: 11);
     private static readonly Guid LevelDefinitionId = Stats.Level.Id;
     private static readonly Guid MasterLevelDefinitionId = Stats.MasterLevel.Id;
@@ -133,6 +135,58 @@ public sealed class PlayerPortalService(
             .ToArray();
 
         return new PlayerAccountSnapshot(account.LoginName, characters);
+    }
+
+    /// <summary>Returns a bounded projection of public OpenMU rankings and configured event times.</summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public async ValueTask<PlayerPortalPublicWorldSnapshot> GetPublicWorldSnapshotAsync(CancellationToken cancellationToken = default)
+    {
+        var configuration = await configurations.GetOwnerAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+        var now = timeProvider.GetUtcNow();
+        using var playerContext = persistence.CreateNewPlayerContext(configuration);
+        var characterRanking = await playerContext.GetCharacterRankingAsync(
+            LevelDefinitionId,
+            MasterLevelDefinitionId,
+            Stats.Resets.Id,
+            PublicRankingCandidateEntries,
+            cancellationToken).ConfigureAwait(false);
+        using var guildContext = persistence.CreateNewGuildContext();
+        var guildRanking = await guildContext.GetGuildsOrderedByScoreAsync(PublicRankingCandidateEntries, cancellationToken).ConfigureAwait(false);
+
+        return new PlayerPortalPublicWorldSnapshot(
+            characterRanking
+                .Where(character => IsPublicRankingName(character.Name, isCharacter: true))
+                .Take(PublicRankingMaximumEntries)
+                .Select(character => new PlayerPortalCharacterRankingEntry(
+                    character.Name,
+                    character.CharacterClassName,
+                    character.Level,
+                    character.MasterLevel))
+                .ToArray(),
+            guildRanking
+                .Where(guild => !string.IsNullOrWhiteSpace(guild.Name))
+                .Where(guild => IsPublicRankingName(guild.Name!, isCharacter: false))
+                .Take(PublicRankingMaximumEntries)
+                .Select(guild => new PlayerPortalGuildRankingEntry(
+                    guild.Name!,
+                    guild.Score,
+                    guild.Members?.Count ?? 0))
+                .ToArray(),
+            PlayerPortalPublicWorldSchedule.GetUpcoming(
+                configuration.PlugInConfigurations ?? [],
+                configuration.CastleSiegeConfiguration,
+                now),
+            PlayerPortalPublicWorldSchedule.TimeZoneId,
+            now);
+    }
+
+    private static bool IsPublicRankingName(string name, bool isCharacter)
+    {
+        var excludedPrefixes = isCharacter
+            ? new[] { "test", "quest", "socket", "ancient", "recov", "ucb", "ubfe", "e2e" }
+            : new[] { "test", "guild_test", "e2e" };
+        return !excludedPrefixes.Any(prefix => name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            && (!isCharacter || !name.StartsWith("val", StringComparison.OrdinalIgnoreCase) || name.Length < 4 || !char.IsAsciiDigit(name[3]));
     }
 
     private static int ReadStat(float value) => float.IsFinite(value) ? (int)Math.Clamp(value, 0, int.MaxValue) : 0;

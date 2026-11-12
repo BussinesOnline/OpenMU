@@ -187,6 +187,44 @@ public sealed class PlayerPortalApiTests
         Assert.That(typeof(PlayerPortalController).GetMethod(nameof(PlayerPortalController.GetOwnAccountAsync))!.GetParameters(), Has.Length.EqualTo(1));
     }
 
+    /// <summary>The public world projection uses OpenMU rankings and omits account identifiers.</summary>
+    [Test]
+    public async Task PublicWorldSnapshotReturnsBoundedCharacterAndGuildRankingsAsync()
+    {
+        await this._service.RegisterAsync(Registration("rankuser", "GamePass1")).ConfigureAwait(false);
+        await this.AddCharacterAsync("rankuser", "RankHero", 400, 35).ConfigureAwait(false);
+        await this._service.RegisterAsync(Registration("e2euser", "GamePass1")).ConfigureAwait(false);
+        await this.AddCharacterAsync("e2euser", "e2eHero", 400, 99).ConfigureAwait(false);
+        using (var context = this._persistence.CreateNewGuildContext())
+        {
+            var lower = context.CreateNew<MUnique.OpenMU.DataModel.Entities.Guild>();
+            lower.Name = "LowerScore";
+            lower.Score = 2;
+            var higher = context.CreateNew<MUnique.OpenMU.DataModel.Entities.Guild>();
+            higher.Name = "HigherScore";
+            higher.Score = 12;
+            var synthetic = context.CreateNew<MUnique.OpenMU.DataModel.Entities.Guild>();
+            synthetic.Name = "e2eGuild";
+            synthetic.Score = 999;
+            await context.SaveChangesAsync().ConfigureAwait(false);
+        }
+
+        var snapshot = await this._service.GetPublicWorldSnapshotAsync().ConfigureAwait(false);
+
+        Assert.That(snapshot.CharacterRanking, Has.Count.EqualTo(1));
+        Assert.That(snapshot.CharacterRanking[0], Is.EqualTo(new PlayerPortalCharacterRankingEntry("RankHero", "Dark Wizard", 400, 35)));
+        Assert.That(snapshot.CharacterRanking.Any(character => character.Name == "e2eHero"), Is.False);
+        Assert.That(snapshot.GuildRanking.Select(guild => guild.Name), Is.EqualTo(new[] { "HigherScore", "LowerScore" }));
+        Assert.That(snapshot.GuildRanking.Select(guild => guild.Score), Is.EqualTo(new[] { 12, 2 }));
+        Assert.That(snapshot.Events, Is.Empty);
+        Assert.That(snapshot.TimeZoneId, Is.EqualTo("UTC"));
+        Assert.That(typeof(PlayerPortalPublicWorldSnapshot).GetProperties().Select(property => property.Name),
+            Does.Not.Contain("LoginName").And.Not.Contain("AccountId"));
+        Assert.That(typeof(PlayerPortalController).GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true)
+                .Cast<AuthorizeAttribute>().Single().Policy,
+            Is.EqualTo(PlayerPortalApiDefaults.WorkerAuthorizationPolicy));
+    }
+
     /// <summary>The login limiter blocks the eleventh request in a one-minute account window.</summary>
     [Test]
     public async Task RepeatedLoginAttemptsAreLimitedAsync()
