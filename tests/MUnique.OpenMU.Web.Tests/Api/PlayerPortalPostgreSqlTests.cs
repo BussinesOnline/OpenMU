@@ -121,11 +121,11 @@ public sealed class PlayerPortalPostgreSqlTests
             {
                 var account = (await setupRanking.GetAsync<MUnique.OpenMU.DataModel.Entities.Account>().ConfigureAwait(false))
                     .Single(candidate => candidate.LoginName == "portalone");
-                var levelDefinition = setupRanking.CreateNew<MUnique.OpenMU.DataModel.Configuration.AttributeDefinition>(
+                var levelDefinition = setupRanking.CreateNew<MUnique.OpenMU.AttributeSystem.AttributeDefinition>(
                     MUnique.OpenMU.GameLogic.Attributes.Stats.Level.Id,
                     MUnique.OpenMU.GameLogic.Attributes.Stats.Level.Designation,
                     MUnique.OpenMU.GameLogic.Attributes.Stats.Level.Description);
-                var resetsDefinition = setupRanking.CreateNew<MUnique.OpenMU.DataModel.Configuration.AttributeDefinition>(
+                var resetsDefinition = setupRanking.CreateNew<MUnique.OpenMU.AttributeSystem.AttributeDefinition>(
                     MUnique.OpenMU.GameLogic.Attributes.Stats.Resets.Id,
                     MUnique.OpenMU.GameLogic.Attributes.Stats.Resets.Designation,
                     MUnique.OpenMU.GameLogic.Attributes.Stats.Resets.Description);
