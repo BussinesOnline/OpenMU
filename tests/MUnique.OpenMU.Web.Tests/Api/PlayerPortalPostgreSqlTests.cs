@@ -114,6 +114,41 @@ public sealed class PlayerPortalPostgreSqlTests
             Assert.That(firstMe.LoginName, Is.EqualTo("portalone"));
             Assert.That(secondMe.LoginName, Is.EqualTo("portaltwo"));
 
+            // Production characters may not have persisted Master Level attributes. Exercise that
+            // nullable scalar projection with PostgreSQL and the same read-only account role.
+            var rankingConfiguration = new MUnique.OpenMU.Persistence.BasicModel.GameConfiguration();
+            using (var setupRanking = persistence.CreateNewContext())
+            {
+                var account = (await setupRanking.GetAsync<MUnique.OpenMU.DataModel.Entities.Account>().ConfigureAwait(false))
+                    .Single(candidate => candidate.LoginName == "portalone");
+                var characterClass = setupRanking.CreateNew<MUnique.OpenMU.DataModel.Configuration.CharacterClass>();
+                characterClass.Name = "Dark Wizard";
+                characterClass.Number = 1;
+                var character = setupRanking.CreateNew<MUnique.OpenMU.DataModel.Entities.Character>();
+                character.Name = "NoMasterAttribute";
+                character.CharacterSlot = 0;
+                character.CharacterStatus = MUnique.OpenMU.DataModel.Entities.CharacterStatus.Normal;
+                character.CharacterClass = characterClass;
+                character.Attributes.Add(setupRanking.CreateNew<MUnique.OpenMU.AttributeSystem.StatAttribute>(MUnique.OpenMU.GameLogic.Attributes.Stats.Level, 400f));
+                character.Attributes.Add(setupRanking.CreateNew<MUnique.OpenMU.AttributeSystem.StatAttribute>(MUnique.OpenMU.GameLogic.Attributes.Stats.Resets, 0f));
+                account.Characters.Add(character);
+                Assert.That(await setupRanking.SaveChangesAsync().ConfigureAwait(false), Is.True);
+                rankingConfiguration.CharacterClasses.Add(characterClass);
+            }
+
+            using (var rankingContext = persistence.CreateNewPlayerContext(rankingConfiguration))
+            {
+                var ranking = await rankingContext.GetCharacterRankingWithoutResetsAsync(
+                    MUnique.OpenMU.GameLogic.Attributes.Stats.Level.Id,
+                    MUnique.OpenMU.GameLogic.Attributes.Stats.MasterLevel.Id,
+                    MUnique.OpenMU.GameLogic.Attributes.Stats.Resets.Id,
+                    10).ConfigureAwait(false);
+                var missingMasterLevel = ranking.Single(character => character.Name == "NoMasterAttribute");
+                Assert.That(missingMasterLevel.Level, Is.EqualTo(400));
+                Assert.That(missingMasterLevel.MasterLevel, Is.Zero);
+                Assert.That(missingMasterLevel.Resets, Is.Zero);
+            }
+
             await using var verify = new NpgsqlConnection(requiredAdminConnection);
             await verify.OpenAsync().ConfigureAwait(false);
             await using var rows = new NpgsqlCommand("SELECT count(*) FROM data.\"Account\" WHERE \"LoginName\" IN ('portalone', 'portaltwo')", verify);
