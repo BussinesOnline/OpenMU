@@ -47,6 +47,7 @@ public class CharacterRankingTest
             10).ToQueryString();
 
         Assert.That(sql, Does.Contain("ORDER BY"));
+        Assert.That(sql, Does.Contain("COALESCE"));
     }
 
     /// <summary>
