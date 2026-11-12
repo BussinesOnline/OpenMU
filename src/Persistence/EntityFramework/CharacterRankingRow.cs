@@ -14,4 +14,4 @@ using MUnique.OpenMU.Interfaces;
 /// <param name="Level">The level.</param>
 /// <param name="MasterLevel">The master level.</param>
 /// <param name="Resets">The resets.</param>
-internal sealed record CharacterRankingRow(string Name, LocalizedString ClassName, float Level, float MasterLevel, float Resets);
+internal sealed record CharacterRankingRow(string Name, LocalizedString ClassName, float? Level, float? MasterLevel, float? Resets);
