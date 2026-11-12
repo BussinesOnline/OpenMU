@@ -627,7 +627,7 @@ internal class PlayerContext : CachingEntityFrameworkContext, IPlayerContext
                 .ConfigureAwait(false);
 
             return entries
-                .Select(entry => new CharacterSummary(entry.Name, entry.ClassName ?? default, (int)(entry.Level ?? 0f), (int)(entry.MasterLevel ?? 0f), (int)(entry.Resets ?? 0f)))
+                .Select(entry => this.CreateCharacterSummary(entry))
                 .ToList();
         }
     }
@@ -648,7 +648,7 @@ internal class PlayerContext : CachingEntityFrameworkContext, IPlayerContext
                 .ConfigureAwait(false);
 
             return entries
-                .Select(entry => new CharacterSummary(entry.Name, entry.ClassName ?? default, (int)(entry.Level ?? 0f), (int)(entry.MasterLevel ?? 0f), (int)(entry.Resets ?? 0f)))
+                .Select(entry => this.CreateCharacterSummary(entry))
                 .ToList();
         }
     }
@@ -668,7 +668,7 @@ internal class PlayerContext : CachingEntityFrameworkContext, IPlayerContext
                 .FirstOrDefaultAsync(cancellationToken)
                 .ConfigureAwait(false);
 
-            return entry is null ? null : new CharacterSummary(entry.Name, entry.ClassName ?? default, (int)(entry.Level ?? 0f), (int)(entry.MasterLevel ?? 0f), (int)(entry.Resets ?? 0f));
+            return entry is null ? null : this.CreateCharacterSummary(entry);
         }
     }
 
@@ -763,9 +763,28 @@ internal class PlayerContext : CachingEntityFrameworkContext, IPlayerContext
     {
         return characters.Select(character => new CharacterRankingRow(
             character.Name,
-            character.RawCharacterClass!.Name,
+            character.CharacterClassId,
             character.RawAttributes.Where(a => a.DefinitionId == levelAttributeId).Select(a => (float?)a.Value).FirstOrDefault() ?? 0f,
             character.RawAttributes.Where(a => a.DefinitionId == masterLevelAttributeId).Select(a => (float?)a.Value).FirstOrDefault() ?? 0f,
             character.RawAttributes.Where(a => a.DefinitionId == resetsAttributeId).Select(a => (float?)a.Value).FirstOrDefault() ?? 0f));
     }
+    private CharacterSummary CreateCharacterSummary(CharacterRankingRow entry)
+    {
+        var characterClassName = string.Empty;
+        if (entry.CharacterClassId is { } characterClassId
+            && this.Context is EntityDataContext { CurrentGameConfiguration: { } configuration })
+        {
+            var characterClass = configuration.CharacterClasses.FirstOrDefault(candidate =>
+                candidate is MUnique.OpenMU.Persistence.IIdentifiable identifiable && identifiable.Id == characterClassId);
+            characterClassName = characterClass?.Name.ValueInNeutralLanguage ?? string.Empty;
+        }
+
+        return new CharacterSummary(
+            entry.Name,
+            characterClassName,
+            (int)(entry.Level ?? 0f),
+            (int)(entry.MasterLevel ?? 0f),
+            (int)(entry.Resets ?? 0f));
+    }
+
 }
