@@ -89,6 +89,8 @@ public sealed class PlayerPortalPostgreSqlTests
             using (var setup = persistence.CreateNewContext())
             {
                 _ = setup.CreateNew<GameConfiguration>();
+                var systemConfiguration = setup.CreateNew<SystemConfiguration>();
+                systemConfiguration.TimeZoneId = "America/Sao_Paulo";
                 Assert.That(await setup.SaveChangesAsync().ConfigureAwait(false), Is.True);
             }
 
@@ -111,6 +113,51 @@ public sealed class PlayerPortalPostgreSqlTests
             var secondMe = await RequestMeAsync(service, sessions, second.Session!.Token, "portalone").ConfigureAwait(false);
             Assert.That(firstMe.LoginName, Is.EqualTo("portalone"));
             Assert.That(secondMe.LoginName, Is.EqualTo("portaltwo"));
+
+            // Production characters may not have persisted Master Level attributes. Exercise that
+            // nullable scalar projection with PostgreSQL and the same read-only account role.
+            MUnique.OpenMU.DataModel.Configuration.GameConfiguration rankingConfiguration;
+            using (var setupRanking = persistence.CreateNewContext())
+            {
+                rankingConfiguration = (await setupRanking.GetAsync<MUnique.OpenMU.DataModel.Configuration.GameConfiguration>().ConfigureAwait(false)).Single();
+                var account = (await setupRanking.GetAsync<MUnique.OpenMU.DataModel.Entities.Account>().ConfigureAwait(false))
+                    .Single(candidate => candidate.LoginName == "portalone");
+                var levelDefinition = setupRanking.CreateNew<MUnique.OpenMU.AttributeSystem.AttributeDefinition>(
+                    MUnique.OpenMU.GameLogic.Attributes.Stats.Level.Id,
+                    MUnique.OpenMU.GameLogic.Attributes.Stats.Level.Designation,
+                    MUnique.OpenMU.GameLogic.Attributes.Stats.Level.Description);
+                var resetsDefinition = setupRanking.CreateNew<MUnique.OpenMU.AttributeSystem.AttributeDefinition>(
+                    MUnique.OpenMU.GameLogic.Attributes.Stats.Resets.Id,
+                    MUnique.OpenMU.GameLogic.Attributes.Stats.Resets.Designation,
+                    MUnique.OpenMU.GameLogic.Attributes.Stats.Resets.Description);
+                var characterClass = setupRanking.CreateNew<MUnique.OpenMU.DataModel.Configuration.CharacterClass>();
+                characterClass.Name = "Dark Wizard";
+                characterClass.Number = 1;
+                var character = setupRanking.CreateNew<MUnique.OpenMU.DataModel.Entities.Character>();
+                character.Name = "NoMaster";
+                character.CharacterSlot = 0;
+                character.CharacterStatus = MUnique.OpenMU.DataModel.Entities.CharacterStatus.Normal;
+                character.CharacterClass = characterClass;
+                character.Attributes.Add(setupRanking.CreateNew<MUnique.OpenMU.AttributeSystem.StatAttribute>(levelDefinition, 400f));
+                character.Attributes.Add(setupRanking.CreateNew<MUnique.OpenMU.AttributeSystem.StatAttribute>(resetsDefinition, 0f));
+                rankingConfiguration.CharacterClasses.Add(characterClass);
+                account.Characters.Add(character);
+                Assert.That(await setupRanking.SaveChangesAsync().ConfigureAwait(false), Is.True);
+            }
+
+            using (var rankingContext = persistence.CreateNewPlayerContext(rankingConfiguration))
+            {
+                var ranking = await rankingContext.GetCharacterRankingWithoutResetsAsync(
+                    MUnique.OpenMU.GameLogic.Attributes.Stats.Level.Id,
+                    MUnique.OpenMU.GameLogic.Attributes.Stats.MasterLevel.Id,
+                    MUnique.OpenMU.GameLogic.Attributes.Stats.Resets.Id,
+                    10).ConfigureAwait(false);
+                var missingMasterLevel = ranking.Single(character => character.Name == "NoMaster");
+                Assert.That(missingMasterLevel.Level, Is.EqualTo(400));
+                Assert.That(missingMasterLevel.MasterLevel, Is.Zero);
+                Assert.That(missingMasterLevel.Resets, Is.Zero);
+                Assert.That(missingMasterLevel.CharacterClassName, Is.EqualTo("Dark Wizard"));
+            }
 
             await using var verify = new NpgsqlConnection(requiredAdminConnection);
             await verify.OpenAsync().ConfigureAwait(false);

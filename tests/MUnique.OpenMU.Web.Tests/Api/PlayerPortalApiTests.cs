@@ -187,6 +187,54 @@ public sealed class PlayerPortalApiTests
         Assert.That(typeof(PlayerPortalController).GetMethod(nameof(PlayerPortalController.GetOwnAccountAsync))!.GetParameters(), Has.Length.EqualTo(1));
     }
 
+    /// <summary>The public world projection uses OpenMU rankings and omits account identifiers.</summary>
+    [Test]
+    public async Task PublicWorldSnapshotReturnsBoundedCharacterAndGuildRankingsAsync()
+    {
+        await this._service.RegisterAsync(Registration("rankuser", "GamePass1")).ConfigureAwait(false);
+        await this.AddCharacterAsync("rankuser", "RankHero", 400, 35, 99).ConfigureAwait(false);
+        await this._service.RegisterAsync(Registration("e2euser", "GamePass1")).ConfigureAwait(false);
+        await this.AddCharacterAsync("e2euser", "e2eHero", 400, 99, 0).ConfigureAwait(false);
+        using (var context = this._persistence.CreateNewGuildContext())
+        {
+            var lower = context.CreateNew<MUnique.OpenMU.DataModel.Entities.Guild>();
+            lower.Name = "LowerScore";
+            lower.Score = 2;
+            var higher = context.CreateNew<MUnique.OpenMU.DataModel.Entities.Guild>();
+            higher.Name = "HigherScore";
+            higher.Score = 12;
+            var synthetic = context.CreateNew<MUnique.OpenMU.DataModel.Entities.Guild>();
+            synthetic.Name = "e2eGuild";
+            synthetic.Score = 999;
+            await context.SaveChangesAsync().ConfigureAwait(false);
+        }
+
+        using (var context = this._persistence.CreateNewConfigurationContext())
+        {
+            var systemConfiguration = context.CreateNew<SystemConfiguration>();
+            systemConfiguration.TimeZoneId = "America/Sao_Paulo";
+            await context.SaveChangesAsync().ConfigureAwait(false);
+        }
+
+        var snapshot = await this._service.GetPublicWorldSnapshotAsync().ConfigureAwait(false);
+
+        Assert.That(snapshot.CharacterRanking, Has.Count.EqualTo(2));
+        Assert.That(snapshot.CharacterRanking, Is.EqualTo(new[]
+        {
+            new PlayerPortalCharacterRankingEntry("e2eHero", "Dark Wizard", 400, 99),
+            new PlayerPortalCharacterRankingEntry("RankHero", "Dark Wizard", 400, 35),
+        }));
+        Assert.That(snapshot.GuildRanking.Select(guild => guild.Name), Is.EqualTo(new[] { "HigherScore", "LowerScore" }));
+        Assert.That(snapshot.GuildRanking.Select(guild => guild.Score), Is.EqualTo(new[] { 12, 2 }));
+        Assert.That(snapshot.Events, Is.Empty);
+        Assert.That(snapshot.TimeZoneId, Is.EqualTo("America/Sao_Paulo"));
+        Assert.That(typeof(PlayerPortalPublicWorldSnapshot).GetProperties().Select(property => property.Name),
+            Does.Not.Contain("LoginName").And.Not.Contain("AccountId"));
+        Assert.That(typeof(PlayerPortalController).GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true)
+                .Cast<AuthorizeAttribute>().Single().Policy,
+            Is.EqualTo(PlayerPortalApiDefaults.WorkerAuthorizationPolicy));
+    }
+
     /// <summary>The login limiter blocks the eleventh request in a one-minute account window.</summary>
     [Test]
     public async Task RepeatedLoginAttemptsAreLimitedAsync()
@@ -314,7 +362,7 @@ public sealed class PlayerPortalApiTests
         return await authenticationHandler.AuthenticateAsync().ConfigureAwait(false);
     }
 
-    private async Task AddCharacterAsync(string loginName, string characterName, int level, int masterLevel)
+    private async Task AddCharacterAsync(string loginName, string characterName, int level, int masterLevel, int resets = 0)
     {
         using var context = this._persistence.CreateNewPlayerContext(new GameConfiguration());
         var account = await context.GetAccountByLoginNameAsync(loginName).ConfigureAwait(false);
@@ -324,6 +372,7 @@ public sealed class PlayerPortalApiTests
         character.CharacterClass = new CharacterClass { Name = "Dark Wizard", Number = 1 };
         character.Attributes.Add(context.CreateNew<StatAttribute>(Stats.Level, (float)level));
         character.Attributes.Add(context.CreateNew<StatAttribute>(Stats.MasterLevel, (float)masterLevel));
+        character.Attributes.Add(context.CreateNew<StatAttribute>(Stats.Resets, (float)resets));
         account!.Characters.Add(character);
         await context.SaveChangesAsync().ConfigureAwait(false);
     }

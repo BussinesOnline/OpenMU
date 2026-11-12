@@ -119,6 +119,18 @@ internal class GuildServerContext : CachingEntityFrameworkContext, IGuildServerC
             .ToListAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<DataModel.Entities.Guild>> GetGuildsOrderedByScoreAsync(int count, CancellationToken cancellationToken = default)
+    {
+        return await this.Context.Set<Guild>()
+            .AsNoTracking()
+            .Include(g => g.RawMembers)
+            .OrderByDescending(g => g.Score)
+            .ThenBy(g => g.Name)
+            .Take(count)
+            .ToListAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     /// <inheritdoc/>
     public async ValueTask<IReadOnlyList<DataModel.Entities.Guild>> SearchGuildsAsync(string searchTerm, int skip, int count, CancellationToken cancellationToken = default)
     {

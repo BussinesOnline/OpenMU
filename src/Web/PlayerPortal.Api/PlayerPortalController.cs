@@ -74,6 +74,16 @@ public sealed class PlayerPortalController(PlayerPortalService players, PlayerSe
         return this.Ok(account);
     }
 
+    /// <summary>Returns only public character/guild ranking fields and configured event start times.</summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    [HttpGet("world")]
+    [ProducesResponseType(typeof(PlayerPortalPublicWorldSnapshot), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetPublicWorldAsync(CancellationToken cancellationToken)
+    {
+        var snapshot = await players.GetPublicWorldSnapshotAsync(cancellationToken).ConfigureAwait(false);
+        return this.Ok(snapshot);
+    }
+
     /// <summary>Revokes the presented session. The operation is idempotent to simplify Worker cookie clearing.</summary>
     [HttpDelete("sessions/current")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]

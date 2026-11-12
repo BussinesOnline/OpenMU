@@ -627,7 +627,28 @@ internal class PlayerContext : CachingEntityFrameworkContext, IPlayerContext
                 .ConfigureAwait(false);
 
             return entries
-                .Select(entry => new CharacterSummary(entry.Name, entry.ClassName, (int)entry.Level, (int)entry.MasterLevel, (int)entry.Resets))
+                .Select(entry => this.CreateCharacterSummary(entry))
+                .ToList();
+        }
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<CharacterSummary>> GetCharacterRankingWithoutResetsAsync(
+        Guid levelAttributeId,
+        Guid masterLevelAttributeId,
+        Guid resetsAttributeId,
+        int count,
+        CancellationToken cancellationToken = default)
+    {
+        using var l = await this.LockAsync(cancellationToken).ConfigureAwait(false);
+        using (this.RepositoryProvider.ContextStack.UseContext(this))
+        {
+            var entries = await CreateCharacterRankingWithoutResetsQuery(this.Context.Set<Account>(), levelAttributeId, masterLevelAttributeId, resetsAttributeId, count)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            return entries
+                .Select(entry => this.CreateCharacterSummary(entry))
                 .ToList();
         }
     }
@@ -647,7 +668,7 @@ internal class PlayerContext : CachingEntityFrameworkContext, IPlayerContext
                 .FirstOrDefaultAsync(cancellationToken)
                 .ConfigureAwait(false);
 
-            return entry is null ? null : new CharacterSummary(entry.Name, entry.ClassName, (int)entry.Level, (int)entry.MasterLevel, (int)entry.Resets);
+            return entry is null ? null : this.CreateCharacterSummary(entry);
         }
     }
 
@@ -698,6 +719,35 @@ internal class PlayerContext : CachingEntityFrameworkContext, IPlayerContext
     }
 
     /// <summary>
+    /// Creates the character ranking query without using resets as a ranking criterion.
+    /// </summary>
+    /// <param name="accounts">The accounts.</param>
+    /// <param name="levelAttributeId">The identifier of the attribute definition of the level.</param>
+    /// <param name="masterLevelAttributeId">The identifier of the attribute definition of the master level.</param>
+    /// <param name="resetsAttributeId">The identifier of the attribute definition of the resets.</param>
+    /// <param name="count">The maximum number of entries.</param>
+    /// <returns>The query.</returns>
+    internal static IQueryable<CharacterRankingRow> CreateCharacterRankingWithoutResetsQuery(
+        IQueryable<Account> accounts,
+        Guid levelAttributeId,
+        Guid masterLevelAttributeId,
+        Guid resetsAttributeId,
+        int count)
+    {
+        var characters = accounts
+            .Where(account => !account.IsBot && !account.IsTemplate)
+            .SelectMany(account => account.RawCharacters)
+            .Where(character => character.CharacterStatus == DataModel.Entities.CharacterStatus.Normal)
+            .OrderByDescending(character => character.RawAttributes.Where(a => a.DefinitionId == masterLevelAttributeId).Select(a => (float?)a.Value).FirstOrDefault() ?? 0f)
+            .ThenByDescending(character => character.RawAttributes.Where(a => a.DefinitionId == levelAttributeId).Select(a => (float?)a.Value).FirstOrDefault() ?? 0f)
+            .ThenByDescending(character => character.MasterExperience)
+            .ThenByDescending(character => character.Experience)
+            .Take(count);
+
+        return CreateCharacterSummaryQuery(characters, levelAttributeId, masterLevelAttributeId, resetsAttributeId);
+    }
+
+    /// <summary>
     /// Creates the query which projects the characters to their summary.
     /// </summary>
     /// <param name="characters">The characters.</param>
@@ -713,9 +763,28 @@ internal class PlayerContext : CachingEntityFrameworkContext, IPlayerContext
     {
         return characters.Select(character => new CharacterRankingRow(
             character.Name,
-            character.RawCharacterClass!.Name,
-            character.RawAttributes.Where(a => a.DefinitionId == levelAttributeId).Select(a => a.Value).FirstOrDefault(),
-            character.RawAttributes.Where(a => a.DefinitionId == masterLevelAttributeId).Select(a => a.Value).FirstOrDefault(),
-            character.RawAttributes.Where(a => a.DefinitionId == resetsAttributeId).Select(a => a.Value).FirstOrDefault()));
+            character.CharacterClassId,
+            character.RawAttributes.Where(a => a.DefinitionId == levelAttributeId).Select(a => (float?)a.Value).FirstOrDefault() ?? 0f,
+            character.RawAttributes.Where(a => a.DefinitionId == masterLevelAttributeId).Select(a => (float?)a.Value).FirstOrDefault() ?? 0f,
+            character.RawAttributes.Where(a => a.DefinitionId == resetsAttributeId).Select(a => (float?)a.Value).FirstOrDefault() ?? 0f));
     }
+    private CharacterSummary CreateCharacterSummary(CharacterRankingRow entry)
+    {
+        var characterClassName = string.Empty;
+        if (entry.CharacterClassId is { } characterClassId
+            && this.Context is EntityDataContext { CurrentGameConfiguration: { } configuration })
+        {
+            var characterClass = configuration.CharacterClasses.FirstOrDefault(candidate =>
+                candidate is MUnique.OpenMU.Persistence.IIdentifiable identifiable && identifiable.Id == characterClassId);
+            characterClassName = characterClass?.Name.ValueInNeutralLanguage ?? string.Empty;
+        }
+
+        return new CharacterSummary(
+            entry.Name,
+            characterClassName,
+            (int)(entry.Level ?? 0f),
+            (int)(entry.MasterLevel ?? 0f),
+            (int)(entry.Resets ?? 0f));
+    }
+
 }

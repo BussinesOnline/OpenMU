@@ -373,6 +373,23 @@ public interface IPlayerContext : IContext
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Gets the ranking of player characters, ordered by master level, level and experience, without considering resets.
+    /// Characters of bots, templates and game masters are not ranked.
+    /// </summary>
+    /// <param name="levelAttributeId">The identifier of the attribute definition of the level.</param>
+    /// <param name="masterLevelAttributeId">The identifier of the attribute definition of the master level.</param>
+    /// <param name="resetsAttributeId">The identifier of the attribute definition of the resets.</param>
+    /// <param name="count">The maximum number of entries.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The best characters, ranked without resets.</returns>
+    ValueTask<IReadOnlyList<CharacterSummary>> GetCharacterRankingWithoutResetsAsync(
+        Guid levelAttributeId,
+        Guid masterLevelAttributeId,
+        Guid resetsAttributeId,
+        int count,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Gets the summary of a character.
     /// </summary>
     /// <param name="characterName">The name of the character.</param>

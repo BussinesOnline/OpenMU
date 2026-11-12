@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - feat/openmu-player-api-2c
+      - codex/playerportal-terms-acceptance
     paths:
       - .github/workflows/phase2f-player-portal-isolation.yml
       - src/Dapr/PlayerPortal.Host/**
@@ -13,6 +14,7 @@ on:
   push:
     branches:
       - feat/openmu-player-api-2c
+      - codex/openmu-public-rankings-events
     paths:
       - .github/workflows/phase2f-player-portal-isolation.yml
       - deploy/all-in-one/docker-compose.player-portal.yml
@@ -57,7 +59,8 @@ jobs:
           database_password="$(openssl rand -hex 32)"
           account_password="$(openssl rand -hex 24)"
           configuration_password="$(openssl rand -hex 24)"
-          for value in "$worker_token" "$dapr_token" "$database_password" "$account_password" "$configuration_password"; do
+          guild_password="$(openssl rand -hex 24)"
+          for value in "$worker_token" "$dapr_token" "$database_password" "$account_password" "$configuration_password" "$guild_password"; do
             echo "::add-mask::$value"
           done
           {
@@ -66,6 +69,7 @@ jobs:
             echo "PORTAL_CI_POSTGRES_PASSWORD=$database_password"
             echo "PORTAL_CI_ACCOUNT_PASSWORD=$account_password"
             echo "PORTAL_CI_CONFIGURATION_PASSWORD=$configuration_password"
+            echo "PORTAL_CI_GUILD_PASSWORD=$guild_password"
           } >> "$GITHUB_ENV"
 
       - name: Create ignored local secret files
@@ -77,11 +81,13 @@ jobs:
           directory = pathlib.Path("deploy/all-in-one/player-portal")
           account_password = os.environ["PORTAL_CI_ACCOUNT_PASSWORD"]
           configuration_password = os.environ["PORTAL_CI_CONFIGURATION_PASSWORD"]
+          guild_password = os.environ["PORTAL_CI_GUILD_PASSWORD"]
           relay = "player-portal-db-relay"
           values = {
               "connectionStrings": {
                   "MUnique.OpenMU.Persistence.EntityFramework.AccountContext": f"Host={relay};Database=openmu;User Id=portal_account_ci;Password={account_password};",
                   "MUnique.OpenMU.Persistence.EntityFramework.ConfigurationContext": f"Host={relay};Database=openmu;User Id=portal_config_ci;Password={configuration_password};",
+                  "MUnique.OpenMU.Persistence.EntityFramework.GuildContext": f"Host={relay};Database=openmu;User Id=portal_guild_ci;Password={guild_password};",
               }
           }
           appsettings = {"PlayerPortalApi": {"WorkerToken": os.environ["PORTAL_CI_WORKER_TOKEN"]}}
@@ -185,6 +191,30 @@ jobs:
           dotnet test tests/MUnique.OpenMU.Web.Tests/MUnique.OpenMU.Web.Tests.csproj \
             --configuration Release -p:ci=true --no-build \
             --filter FullyQualifiedName~PlayerPortalPostgreSqlTests
+
+          docker compose --project-name all-in-one --project-directory deploy/all-in-one \
+            -f deploy/all-in-one/docker-compose.player-portal.ci.yml \
+            -f deploy/all-in-one/docker-compose.player-portal.yml exec -T database \
+            psql -v ON_ERROR_STOP=1 -U portal_ci_admin -d openmu <<SQL
+          CREATE ROLE portal_guild_ci LOGIN PASSWORD '$PORTAL_CI_GUILD_PASSWORD';
+          GRANT USAGE ON SCHEMA guild TO portal_guild_ci;
+          GRANT SELECT ON TABLE guild."Guild", guild."GuildMember" TO portal_guild_ci;
+          DO \$\$
+          BEGIN
+            IF NOT has_table_privilege('portal_guild_ci', 'guild."Guild"', 'SELECT')
+              OR NOT has_table_privilege('portal_guild_ci', 'guild."GuildMember"', 'SELECT')
+              OR has_table_privilege('portal_guild_ci', 'guild."Guild"', 'INSERT')
+              OR has_table_privilege('portal_guild_ci', 'guild."Guild"', 'UPDATE')
+              OR has_table_privilege('portal_guild_ci', 'guild."Guild"', 'DELETE')
+              OR has_table_privilege('portal_guild_ci', 'guild."GuildMember"', 'INSERT')
+              OR has_table_privilege('portal_guild_ci', 'guild."GuildMember"', 'UPDATE')
+              OR has_table_privilege('portal_guild_ci', 'guild."GuildMember"', 'DELETE')
+              OR has_table_privilege('portal_guild_ci', 'data."Character"', 'SELECT') THEN
+              RAISE EXCEPTION 'Guild ranking role does not have the expected read-only grants';
+            END IF;
+          END
+          \$\$;
+          SQL
 
       - name: Build and start API, Dapr, and the PostgreSQL relay
         shell: bash
@@ -459,15 +489,33 @@ jobs:
           login="ci$(openssl rand -hex 3)"
           password="SyntheticPass1"
           printf '{"loginName":"%s","password":"%s"}\n' "$login" "$password" > "$scratch/credentials.json"
+          terms_version="mu-oldverse-terms-draft-1"
+          printf '{"loginName":"%s","password":"%s","termsAccepted":true,"termsVersion":"%s"}\n' \
+            "$login" "$password" "$terms_version" > "$scratch/registration.json"
           printf '{"loginName":"%s","password":"WrongSynthetic1"}\n' "$login" > "$scratch/wrong-credentials.json"
           code="$(curl --silent --output /dev/null --write-out '%{http_code}' \
-            -H 'Content-Type: application/json' --data-binary "@$scratch/credentials.json" \
+            -H 'Content-Type: application/json' --data-binary "@$scratch/registration.json" \
             http://127.0.0.1:18080/player-portal/v1/accounts)"
           [[ "$code" == "401" ]] || { echo "FAIL: request without Worker authentication returned HTTP $code"; exit 1; }
           echo "PASS: request without Worker authentication returned HTTP 401."
+          code="$(curl --silent --output "$scratch/world.json" --write-out '%{http_code}' \
+            -H "Authorization: Bearer $PORTAL_CI_WORKER_TOKEN" \
+            http://127.0.0.1:18080/player-portal/v1/world)"
+          [[ "$code" == "200" ]] || { echo "FAIL: public world snapshot HTTP $code"; exit 1; }
+          python3 - "$scratch/world.json" <<'PY'
+          import json, sys
+          world = json.load(open(sys.argv[1], encoding="utf-8"))
+          assert isinstance(world["characterRanking"], list)
+          assert isinstance(world["guildRanking"], list)
+          assert isinstance(world["events"], list)
+          assert world["timeZoneId"] == "America/Sao_Paulo"
+          assert all("accountId" not in row for row in world["characterRanking"])
+          assert all("masterName" not in row for row in world["guildRanking"])
+          print("PASS: public world snapshot returns bounded public fields from disposable PostgreSQL without a player session.")
+          PY
           code="$(curl --silent --output "$scratch/response.json" --write-out '%{http_code}' \
             -H "Authorization: Bearer $PORTAL_CI_WORKER_TOKEN" -H 'Content-Type: application/json' \
-            --data-binary "@$scratch/credentials.json" http://127.0.0.1:18080/player-portal/v1/accounts)"
+            --data-binary "@$scratch/registration.json" http://127.0.0.1:18080/player-portal/v1/accounts)"
           [[ "$code" == "202" ]] || { echo "FAIL: synthetic registration HTTP $code"; exit 1; }
           persisted="$("${compose[@]}" exec -T database psql -U portal_ci_admin -d openmu -Atc "SELECT count(*) FROM data.\"Account\" WHERE \"LoginName\" = '$login'")"
           [[ "$persisted" == "1" ]] || { echo "FAIL: synthetic account persistence was not confirmed."; exit 1; }
@@ -479,7 +527,7 @@ jobs:
           echo "PASS: incorrect-password login returned HTTP 401."
           code="$(curl --silent --output /dev/null --write-out '%{http_code}' \
             -H 'Authorization: Bearer invalid-synthetic-worker-token' -H 'Content-Type: application/json' \
-            --data-binary "@$scratch/credentials.json" http://127.0.0.1:18080/player-portal/v1/accounts)"
+            --data-binary "@$scratch/registration.json" http://127.0.0.1:18080/player-portal/v1/accounts)"
           [[ "$code" == "401" ]] || { echo "FAIL: invalid Worker credential returned HTTP $code"; exit 1; }
           code="$(curl --silent --output "$scratch/login.json" --write-out '%{http_code}' \
             -H "Authorization: Bearer $PORTAL_CI_WORKER_TOKEN" -H 'Content-Type: application/json' \

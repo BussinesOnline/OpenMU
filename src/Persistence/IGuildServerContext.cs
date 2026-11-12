@@ -72,6 +72,14 @@ public interface IGuildServerContext : IContext
     ValueTask<IReadOnlyList<DataModel.Entities.Guild>> GetGuildsOrderedByNameAsync(int skip, int count, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Gets guilds ordered by their persisted score, without loading the full guild table.
+    /// </summary>
+    /// <param name="count">The maximum number of guilds to return.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The highest-scoring guilds.</returns>
+    ValueTask<IReadOnlyList<DataModel.Entities.Guild>> GetGuildsOrderedByScoreAsync(int count, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Searches guilds by name and returns a page of the matching results, without loading the whole guild table into memory.
     /// </summary>
     /// <param name="searchTerm">The case-insensitive search term which is matched against the guild name.</param>
