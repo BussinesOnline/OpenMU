@@ -738,8 +738,8 @@ internal class PlayerContext : CachingEntityFrameworkContext, IPlayerContext
             .Where(account => !account.IsBot && !account.IsTemplate)
             .SelectMany(account => account.RawCharacters)
             .Where(character => character.CharacterStatus == DataModel.Entities.CharacterStatus.Normal)
-            .OrderByDescending(character => character.RawAttributes.Where(a => a.DefinitionId == masterLevelAttributeId).Select(a => a.Value).FirstOrDefault())
-            .ThenByDescending(character => character.RawAttributes.Where(a => a.DefinitionId == levelAttributeId).Select(a => a.Value).FirstOrDefault())
+            .OrderByDescending(character => character.RawAttributes.Where(a => a.DefinitionId == masterLevelAttributeId).Select(a => (float?)a.Value).FirstOrDefault() ?? 0f)
+            .ThenByDescending(character => character.RawAttributes.Where(a => a.DefinitionId == levelAttributeId).Select(a => (float?)a.Value).FirstOrDefault() ?? 0f)
             .ThenByDescending(character => character.MasterExperience)
             .ThenByDescending(character => character.Experience)
             .Take(count);
