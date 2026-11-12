@@ -437,6 +437,31 @@ public class PlayerInMemoryContext : InMemoryContext, IPlayerContext
     }
 
     /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<CharacterSummary>> GetCharacterRankingWithoutResetsAsync(
+        Guid levelAttributeId,
+        Guid masterLevelAttributeId,
+        Guid resetsAttributeId,
+        int count,
+        CancellationToken cancellationToken = default)
+    {
+        var accounts = await this.Provider.GetRepository<Account>()
+            .GetAllAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return accounts
+            .Where(account => !account.IsBot && !account.IsTemplate)
+            .SelectMany(account => account.Characters)
+            .Where(character => character.CharacterStatus == DataModel.Entities.CharacterStatus.Normal)
+            .OrderByDescending(character => GetValue(character, masterLevelAttributeId))
+            .ThenByDescending(character => GetValue(character, levelAttributeId))
+            .ThenByDescending(character => character.MasterExperience)
+            .ThenByDescending(character => character.Experience)
+            .Take(count)
+            .Select(character => ToSummary(character, levelAttributeId, masterLevelAttributeId, resetsAttributeId))
+            .ToList();
+    }
+
+    /// <inheritdoc />
     public async ValueTask<CharacterSummary?> GetCharacterSummaryAsync(
         string characterName,
         Guid levelAttributeId,

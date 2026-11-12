@@ -192,9 +192,9 @@ public sealed class PlayerPortalApiTests
     public async Task PublicWorldSnapshotReturnsBoundedCharacterAndGuildRankingsAsync()
     {
         await this._service.RegisterAsync(Registration("rankuser", "GamePass1")).ConfigureAwait(false);
-        await this.AddCharacterAsync("rankuser", "RankHero", 400, 35).ConfigureAwait(false);
+        await this.AddCharacterAsync("rankuser", "RankHero", 400, 35, 99).ConfigureAwait(false);
         await this._service.RegisterAsync(Registration("e2euser", "GamePass1")).ConfigureAwait(false);
-        await this.AddCharacterAsync("e2euser", "e2eHero", 400, 99).ConfigureAwait(false);
+        await this.AddCharacterAsync("e2euser", "e2eHero", 400, 99, 0).ConfigureAwait(false);
         using (var context = this._persistence.CreateNewGuildContext())
         {
             var lower = context.CreateNew<MUnique.OpenMU.DataModel.Entities.Guild>();
@@ -218,9 +218,12 @@ public sealed class PlayerPortalApiTests
 
         var snapshot = await this._service.GetPublicWorldSnapshotAsync().ConfigureAwait(false);
 
-        Assert.That(snapshot.CharacterRanking, Has.Count.EqualTo(1));
-        Assert.That(snapshot.CharacterRanking[0], Is.EqualTo(new PlayerPortalCharacterRankingEntry("RankHero", "Dark Wizard", 400, 35)));
-        Assert.That(snapshot.CharacterRanking.Any(character => character.Name == "e2eHero"), Is.False);
+        Assert.That(snapshot.CharacterRanking, Has.Count.EqualTo(2));
+        Assert.That(snapshot.CharacterRanking, Is.EqualTo(new[]
+        {
+            new PlayerPortalCharacterRankingEntry("e2eHero", "Dark Wizard", 400, 99),
+            new PlayerPortalCharacterRankingEntry("RankHero", "Dark Wizard", 400, 35),
+        }));
         Assert.That(snapshot.GuildRanking.Select(guild => guild.Name), Is.EqualTo(new[] { "HigherScore", "LowerScore" }));
         Assert.That(snapshot.GuildRanking.Select(guild => guild.Score), Is.EqualTo(new[] { 12, 2 }));
         Assert.That(snapshot.Events, Is.Empty);
@@ -359,7 +362,7 @@ public sealed class PlayerPortalApiTests
         return await authenticationHandler.AuthenticateAsync().ConfigureAwait(false);
     }
 
-    private async Task AddCharacterAsync(string loginName, string characterName, int level, int masterLevel)
+    private async Task AddCharacterAsync(string loginName, string characterName, int level, int masterLevel, int resets = 0)
     {
         using var context = this._persistence.CreateNewPlayerContext(new GameConfiguration());
         var account = await context.GetAccountByLoginNameAsync(loginName).ConfigureAwait(false);
@@ -369,6 +372,7 @@ public sealed class PlayerPortalApiTests
         character.CharacterClass = new CharacterClass { Name = "Dark Wizard", Number = 1 };
         character.Attributes.Add(context.CreateNew<StatAttribute>(Stats.Level, (float)level));
         character.Attributes.Add(context.CreateNew<StatAttribute>(Stats.MasterLevel, (float)masterLevel));
+        character.Attributes.Add(context.CreateNew<StatAttribute>(Stats.Resets, (float)resets));
         account!.Characters.Add(character);
         await context.SaveChangesAsync().ConfigureAwait(false);
     }

@@ -32,6 +32,24 @@ public class CharacterRankingTest
     }
 
     /// <summary>
+    /// Tests that the no-reset entity framework ranking query can be translated to SQL.
+    /// </summary>
+    [Test]
+    public void EntityFrameworkNoResetRankingQueryIsTranslatable()
+    {
+        using var context = new AccountContext();
+
+        var sql = PlayerContext.CreateCharacterRankingWithoutResetsQuery(
+            context.Set<Persistence.EntityFramework.Model.Account>(),
+            Stats.Level.Id,
+            Stats.MasterLevel.Id,
+            Stats.Resets.Id,
+            10).ToQueryString();
+
+        Assert.That(sql, Does.Contain("ORDER BY"));
+    }
+
+    /// <summary>
     /// Tests that the query of the accounts of characters can be translated to SQL.
     /// </summary>
     [Test]
@@ -67,6 +85,29 @@ public class CharacterRankingTest
 
         Assert.That(ranking.Select(entry => entry.Name), Is.EqualTo(new[] { "Reset", "Master", "Normal" }));
         Assert.That(ranking[1], Is.EqualTo(new CharacterSummary("Master", "Blade Knight", 400, 50, 0)));
+    }
+
+    /// <summary>
+    /// Tests that the no-reset ranking prioritizes master level and level over reset count.
+    /// </summary>
+    [Test]
+    public async Task CharactersAreRankedWithoutResetsAsync()
+    {
+        var contextProvider = new InMemoryPersistenceContextProvider();
+        using (var context = contextProvider.CreateNewPlayerContext(new GameConfiguration()))
+        {
+            var characterClass = context.CreateNew<CharacterClass>();
+            characterClass.Name = "Blade Knight";
+            AddAccount(context, characterClass, isBot: false, ("HighReset", 100, 0, 99, CharacterStatus.Normal), ("HighMaster", 400, 50, 0, CharacterStatus.Normal));
+            AddAccount(context, characterClass, isBot: false, ("HighLevel", 400, 0, 0, CharacterStatus.Normal));
+            await context.SaveChangesAsync().ConfigureAwait(false);
+        }
+
+        using var queryContext = contextProvider.CreateNewPlayerContext(new GameConfiguration());
+        var ranking = await queryContext.GetCharacterRankingWithoutResetsAsync(Stats.Level.Id, Stats.MasterLevel.Id, Stats.Resets.Id, 10).ConfigureAwait(false);
+
+        Assert.That(ranking.Select(entry => entry.Name), Is.EqualTo(new[] { "HighMaster", "HighLevel", "HighReset" }));
+        Assert.That(ranking.Single(entry => entry.Name == "HighReset").Resets, Is.EqualTo(99));
     }
 
     /// <summary>

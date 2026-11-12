@@ -147,7 +147,7 @@ public sealed class PlayerPortalService(
         var systemConfiguration = (await systemConfigurationContext.GetAsync<SystemConfiguration>(cancellationToken).ConfigureAwait(false)).FirstOrDefault();
         var serverTimeZone = PlayerPortalPublicWorldSchedule.ResolveServerTimeZone(systemConfiguration?.TimeZoneId);
         using var playerContext = persistence.CreateNewPlayerContext(configuration);
-        var characterRanking = await playerContext.GetCharacterRankingAsync(
+        var characterRanking = await playerContext.GetCharacterRankingWithoutResetsAsync(
             LevelDefinitionId,
             MasterLevelDefinitionId,
             Stats.Resets.Id,
@@ -158,7 +158,6 @@ public sealed class PlayerPortalService(
 
         return new PlayerPortalPublicWorldSnapshot(
             characterRanking
-                .Where(character => IsPublicRankingName(character.Name, isCharacter: true))
                 .Take(PublicRankingMaximumEntries)
                 .Select(character => new PlayerPortalCharacterRankingEntry(
                     character.Name,
@@ -168,7 +167,7 @@ public sealed class PlayerPortalService(
                 .ToArray(),
             guildRanking
                 .Where(guild => !string.IsNullOrWhiteSpace(guild.Name))
-                .Where(guild => IsPublicRankingName(guild.Name!, isCharacter: false))
+                .Where(guild => IsPublicRankingGuildName(guild.Name!))
                 .Take(PublicRankingMaximumEntries)
                 .Select(guild => new PlayerPortalGuildRankingEntry(
                     guild.Name!,
@@ -184,13 +183,10 @@ public sealed class PlayerPortalService(
             now);
     }
 
-    private static bool IsPublicRankingName(string name, bool isCharacter)
+    private static bool IsPublicRankingGuildName(string name)
     {
-        var excludedPrefixes = isCharacter
-            ? new[] { "test", "quest", "socket", "ancient", "recov", "ucb", "ubfe", "e2e" }
-            : new[] { "test", "guild_test", "e2e" };
-        return !excludedPrefixes.Any(prefix => name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            && (!isCharacter || !name.StartsWith("val", StringComparison.OrdinalIgnoreCase) || name.Length < 4 || !char.IsAsciiDigit(name[3]));
+        var excludedPrefixes = new[] { "test", "guild_test", "e2e" };
+        return !excludedPrefixes.Any(prefix => name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
     }
 
     private static int ReadStat(float value) => float.IsFinite(value) ? (int)Math.Clamp(value, 0, int.MaxValue) : 0;
