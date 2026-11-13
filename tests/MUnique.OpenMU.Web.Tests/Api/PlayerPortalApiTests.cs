@@ -55,6 +55,11 @@ public sealed class PlayerPortalApiTests
         this._service = new PlayerPortalService(this._persistence, this._configuration, this._registrations, this._sessions, this._attempts, this._time);
     }
 
+    /// <summary>The API and public registration contract share the one release candidate revision.</summary>
+    [Test]
+    public void RequiredTermsVersionUsesTheReleaseCandidate()
+        => Assert.That(PlayerPortalApiDefaults.RequiredTermsVersion, Is.EqualTo("mu-oldverse-terms-2026-11-12-v1"));
+
     /// <summary>A valid account uses BCrypt persistence accepted by the same native player authentication method.</summary>
     [Test]
     public async Task RegistrationUsesNativeOpenMuAccountAndBCryptAsync()
@@ -85,23 +90,31 @@ public sealed class PlayerPortalApiTests
         Assert.That(await context.AuthenticateAsync("portaluser", "Changed22").ConfigureAwait(false), Is.Null);
     }
 
-    /// <summary>Missing, declined, and stale terms acceptance cannot create an account.</summary>
+    /// <summary>Missing age confirmation, missing/declined age or terms acceptance, and stale terms cannot create an account.</summary>
     [Test]
-    public async Task RegistrationRequiresCurrentTermsAcceptanceAsync()
+    public async Task RegistrationRequiresAgeAndCurrentTermsAcceptanceAsync()
     {
+        var underAge = Registration("underage", "GamePass1");
+        underAge.AgeConfirmed = false;
         var declined = Registration("declined", "GamePass1");
         declined.TermsAccepted = false;
         var stale = Registration("stale", "GamePass1");
-        stale.TermsVersion = "old-terms-version";
+        stale.TermsVersion = "mu-oldverse-terms-draft-1";
         var missing = Registration("missing", "GamePass1");
         missing.TermsAccepted = null;
+        var missingAge = Registration("missingage", "GamePass1");
+        missingAge.AgeConfirmed = null;
 
+        Assert.That(await this._service.RegisterAsync(underAge).ConfigureAwait(false), Is.EqualTo(AccountRegistrationStatus.Invalid));
         Assert.That(await this._service.RegisterAsync(declined).ConfigureAwait(false), Is.EqualTo(AccountRegistrationStatus.Invalid));
         Assert.That(await this._service.RegisterAsync(stale).ConfigureAwait(false), Is.EqualTo(AccountRegistrationStatus.Invalid));
         Assert.That(await this._service.RegisterAsync(missing).ConfigureAwait(false), Is.EqualTo(AccountRegistrationStatus.Invalid));
+        Assert.That(await this._service.RegisterAsync(missingAge).ConfigureAwait(false), Is.EqualTo(AccountRegistrationStatus.Invalid));
+        Assert.That(await this.GetAccountAsync("underage").ConfigureAwait(false), Is.Null);
         Assert.That(await this.GetAccountAsync("declined").ConfigureAwait(false), Is.Null);
         Assert.That(await this.GetAccountAsync("stale").ConfigureAwait(false), Is.Null);
         Assert.That(await this.GetAccountAsync("missing").ConfigureAwait(false), Is.Null);
+        Assert.That(await this.GetAccountAsync("missingage").ConfigureAwait(false), Is.Null);
     }
 
     /// <summary>Correct and incorrect passwords produce native authentication outcomes with no account disclosure.</summary>
@@ -296,6 +309,7 @@ public sealed class PlayerPortalApiTests
     {
         LoginName = loginName,
         Password = password,
+        AgeConfirmed = true,
         TermsAccepted = true,
         TermsVersion = PlayerPortalApiDefaults.RequiredTermsVersion,
     };

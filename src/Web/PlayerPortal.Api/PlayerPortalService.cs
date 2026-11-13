@@ -32,7 +32,8 @@ public sealed class PlayerPortalService(
     /// <param name="cancellationToken">The cancellation token.</param>
     public ValueTask<AccountRegistrationStatus> RegisterAsync(PlayerPortalRegistrationRequest registration, CancellationToken cancellationToken = default)
     {
-        if (registration.TermsAccepted != true
+        if (registration.AgeConfirmed != true
+            || registration.TermsAccepted != true
             || !string.Equals(registration.TermsVersion, PlayerPortalApiDefaults.RequiredTermsVersion, StringComparison.Ordinal)
             || !AccountRegistrationService.IsValid(registration.ToAccountRegistration()))
         {
