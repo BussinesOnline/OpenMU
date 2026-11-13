@@ -6,7 +6,7 @@ namespace MUnique.OpenMU.Web.PlayerPortal.Api;
 
 using System.ComponentModel.DataAnnotations;
 
-/// <summary>Player portal registration data, including explicit acceptance of the required terms revision.</summary>
+/// <summary>Player portal registration data, including the age declaration and required terms acceptance.</summary>
 public sealed class PlayerPortalRegistrationRequest
 {
     /// <summary>Gets or sets the OpenMU login name, limited to the Season 6 login packet size.</summary>
@@ -26,6 +26,10 @@ public sealed class PlayerPortalRegistrationRequest
     /// <summary>Gets or sets the optional e-mail address.</summary>
     [EmailAddress]
     public string? EMail { get; set; }
+
+    /// <summary>Gets or sets whether the user confirmed being at least 18 years old.</summary>
+    [Required]
+    public bool? AgeConfirmed { get; set; }
 
     /// <summary>Gets or sets whether the user explicitly accepted the required terms revision.</summary>
     [Required]
