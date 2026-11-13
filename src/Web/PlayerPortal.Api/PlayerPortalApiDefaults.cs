@@ -19,6 +19,6 @@ public static class PlayerPortalApiDefaults
     /// <summary>The configuration key holding the distinct Worker service credential.</summary>
     public const string WorkerTokenConfigurationKey = "PlayerPortalApi:WorkerToken";
 
-    /// <summary>The immutable draft terms revision currently required by portal registration.</summary>
-    public const string RequiredTermsVersion = "mu-oldverse-terms-draft-1";
+    /// <summary>The immutable Terms revision required by portal registration.</summary>
+    public const string RequiredTermsVersion = "mu-oldverse-terms-2026-11-12-v1";
 }

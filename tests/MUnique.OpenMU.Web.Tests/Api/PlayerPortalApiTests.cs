@@ -55,6 +55,11 @@ public sealed class PlayerPortalApiTests
         this._service = new PlayerPortalService(this._persistence, this._configuration, this._registrations, this._sessions, this._attempts, this._time);
     }
 
+    /// <summary>The API and public registration contract share the one release candidate revision.</summary>
+    [Test]
+    public void RequiredTermsVersionUsesTheReleaseCandidate()
+        => Assert.That(PlayerPortalApiDefaults.RequiredTermsVersion, Is.EqualTo("mu-oldverse-terms-2026-11-12-v1"));
+
     /// <summary>A valid account uses BCrypt persistence accepted by the same native player authentication method.</summary>
     [Test]
     public async Task RegistrationUsesNativeOpenMuAccountAndBCryptAsync()
@@ -92,7 +97,7 @@ public sealed class PlayerPortalApiTests
         var declined = Registration("declined", "GamePass1");
         declined.TermsAccepted = false;
         var stale = Registration("stale", "GamePass1");
-        stale.TermsVersion = "old-terms-version";
+        stale.TermsVersion = "mu-oldverse-terms-draft-1";
         var missing = Registration("missing", "GamePass1");
         missing.TermsAccepted = null;
 
